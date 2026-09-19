@@ -2,6 +2,8 @@ use color_eyre::eyre::Result;
 use core::time::Duration;
 use std::io;
 
+mod database;
+
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
