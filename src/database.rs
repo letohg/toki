@@ -13,6 +13,14 @@ fn get_now_utc_py() -> String {
     }
 }
 
+pub struct Project {
+    pub id: EntityId,
+    pub name: String,
+    pub color: String, // hex color
+    pub description: String,
+    pub create_at: String,
+}
+
 pub struct TimeEntry {
     pub id: EntityId,
     pub project_id: EntityId,
@@ -136,6 +144,27 @@ pub fn get_recent_entries(limit: u32) -> Vec<TimeEntry> {
         .unwrap();
     entries.filter_map(|e| e.ok()).collect()
 }
+
+pub fn get_projects() -> rusqlite::Result<Vec<Project>> {
+    let con = get_connection();
+    let mut stmt =
+        con.prepare("SELECT id, name, color, description, created_at FROM projects ORDER BY name")?;
+
+    let projects = stmt.query_map([], |row| {
+        Ok(Project {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            color: row.get(2)?,
+            description: row.get(3)?,
+            create_at: row.get(4)?,
+        })
+    })?;
+    Ok(projects.filter_map(|p| p.ok()).collect())
+}
+
+///////////////////////////////////////////////////////
+/// Debugging functions
+///////////////////////////////////////////////////////
 
 pub fn test_db_queries() {
     let db_file = "~/.local/share/time-tracker/data-rs.db".resolve();

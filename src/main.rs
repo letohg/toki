@@ -12,6 +12,7 @@ use ratatui::crossterm::terminal::{EnterAlternateScreen, enable_raw_mode};
 use ratatui::crossterm::terminal::{LeaveAlternateScreen, disable_raw_mode};
 use ratatui::prelude::*;
 use ratatui::widgets::BorderType;
+use ratatui::widgets::Cell;
 use ratatui::widgets::Clear;
 use ratatui::widgets::Table;
 use ratatui::widgets::{List, Row};
@@ -24,6 +25,7 @@ use ratatui::{
     widgets::Paragraph,
 };
 use std::io;
+use std::str::FromStr;
 
 fn delta_hms(start: &str, end: &Option<String>) -> String {
     let ts = chrono::DateTime::parse_from_rfc3339(start).unwrap();
@@ -42,23 +44,32 @@ fn delta_hms(start: &str, end: &Option<String>) -> String {
     format!("{:02}:{:02}:{:02}", h, m, s)
 }
 
+enum View {
+    Timer,
+    Projects,
+}
+
 struct App {
     exit: bool,
+    active_view: View,
     active_entry: Option<database::TimeEntry>,
     recent_entries: Vec<database::TimeEntry>,
+    projects: Vec<database::Project>,
     error_message: Option<String>,
 }
 
 impl App {
     pub fn new() -> Self {
-        let active_entry = database::get_running_entry();
-        let recent_entries = database::get_recent_entries(10);
-        Self {
+        let mut app = Self {
             exit: false,
-            active_entry,
-            recent_entries,
-            error_message: Some("Error".to_string()),
-        }
+            active_view: View::Timer,
+            active_entry: None,
+            recent_entries: vec![],
+            projects: vec![],
+            error_message: None,
+        };
+        app.update_state();
+        app
     }
 
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
@@ -71,36 +82,36 @@ impl App {
     fn update_state(&mut self) {
         self.active_entry = database::get_running_entry();
         self.recent_entries = database::get_recent_entries(10);
+        match database::get_projects() {
+            Ok(projects) => {
+                self.projects = projects;
+            }
+            Err(_) => {
+                self.set_error("Failed to retrieve Projects from Database!".to_owned());
+            }
+        }
     }
 
-    fn draw(&self, frame: &mut Frame) {
-        let block = Block::bordered()
+    fn draw(&mut self, frame: &mut Frame) {
+        let window = Block::bordered()
             .border_type(ratatui::widgets::BorderType::Rounded)
             .title("TimeTracker");
         let area = frame.area();
-        let inner_area = block.inner(area);
+        frame.render_widget(&window, area);
         let [top, middle, bottom] = Layout::vertical([
             Constraint::Length(3),
             Constraint::Min(0),
-            Constraint::Length(3),
+            Constraint::Length(1),
         ])
-        .areas(inner_area);
+        .areas(window.inner(area));
 
-        let navbar = Block::bordered()
-            .border_type(BorderType::Rounded)
-            .title("Navigation");
-        let text = Self::create_navbar(vec!["Home", "Projects"]);
-        frame.render_widget(Paragraph::new(text).block(navbar), top);
+        self.render_navbar(frame, top);
+        self.render_page(frame, middle);
+        self.render_footer(frame, bottom);
+        self.render_popup(frame, area);
+    }
 
-        let footer = Block::bordered().border_type(BorderType::Rounded);
-        frame.render_widget(footer, bottom);
-
-        let page = Block::bordered()
-            .border_type(BorderType::Rounded)
-            .title("Tracker");
-        frame.render_widget(&page, middle);
-        self.render_tracker_view(frame, page.inner(middle));
-
+    fn render_popup(&mut self, frame: &mut Frame, area: Rect) {
         if let Some(error) = self.error_message.as_ref() {
             let popup_block = Block::bordered().title("Error").style(Color::Red);
             let centered_area =
@@ -109,17 +120,23 @@ impl App {
             let error_msg = Paragraph::new(error.clone()).block(popup_block).bold();
             frame.render_widget(error_msg, centered_area);
         }
-        //     if show_popup {
-        //     let popup_block = Block::bordered().title("Popup");
-        //     let centered_area = area.centered(Constraint::Percentage(60), Constraint::Percentage(20));
-        //     // clears out any background in the area before rendering the popup
-        //     frame.render_widget(Clear, centered_area);
-        //     let paragraph = Paragraph::new("Lorem ipsum").block(popup_block);
-        //     frame.render_widget(paragraph, centered_area);
-        //     // another solution is to use the inner area of the block
-        //     // let inner_area = popup_block.inner(centered_area);
-        //     // frame.render_widget(your_widget, inner_area);
-        // }
+    }
+
+    fn render_page(&mut self, frame: &mut Frame, area: Rect) {
+        let page = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .title("Tracker");
+        frame.render_widget(&page, area);
+
+        match self.active_view {
+            View::Timer => self.render_tracker_view(frame, page.inner(area)),
+            View::Projects => self.render_project_view(frame, page.inner(area)),
+        }
+    }
+
+    fn render_footer(&self, frame: &mut Frame, area: Rect) {
+        let footer = Block::new().title("Footer");
+        frame.render_widget(footer, area);
     }
 
     fn render_tracker_view(&self, frame: &mut Frame, area: Rect) {
@@ -142,18 +159,40 @@ impl App {
         frame.render_widget(p, tracker_area);
 
         let rows = self.recent_entries.iter().map(|e| {
+            let project = self.projects.iter().find(|p| p.id == e.project_id);
+            let project_color = project.map_or(style::Color::Yellow, |p| {
+                style::Color::from_str(&p.color).unwrap()
+            });
             Row::new(vec![
-                format!("{}", e.project_id),
-                format!("{}", e.task_id.unwrap_or(0)),
-                format!("{}", e.description),
-                format!("{}", e.start_time),
-                format!("{}", e.end_time.clone().unwrap_or("Running".to_owned())),
-                format!("{}", delta_hms(&e.start_time, &e.end_time)),
+                Cell::from("*").style(Style::new().fg(project_color)),
+                Cell::from(project.map_or("None".to_string(), |p| p.name.clone())),
+                Cell::from(e.description.clone()),
+                Cell::from(format!("{}", e.start_time)),
+                Cell::from(format!(
+                    "{}",
+                    e.end_time.clone().unwrap_or("Running".to_owned())
+                )),
+                Cell::from(format!("{}", delta_hms(&e.start_time, &e.end_time))),
             ])
         });
-        let table = Table::default().rows(rows);
+        let column_widths = vec![
+            Constraint::Length(15),
+            Constraint::Length(15),
+            Constraint::Min(0),
+            Constraint::Min(0),
+        ];
+        let table = Table::new(rows, column_widths);
         frame.render_widget(table, entries_area);
     }
+
+    fn render_navbar(&self, frame: &mut Frame, top: Rect) {
+        let navbar = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .title("Navigation");
+        let text = Self::create_navbar(vec!["Home", "Projects"]);
+        frame.render_widget(Paragraph::new(text).block(navbar), top);
+    }
+
     fn create_navbar(items: Vec<&str>) -> Line {
         let styled_items: Vec<Span> = items
             .iter()
@@ -174,6 +213,7 @@ impl App {
             .collect();
         Line::from(styled_items)
     }
+
     fn handle_events(&mut self) -> Result<()> {
         let timeout = Duration::from_secs_f64(1.0 / 50.0);
         if !event::poll(timeout)? {
@@ -195,6 +235,8 @@ impl App {
                     self.exit = true;
                 }
             }
+            KeyCode::Char('1') => self.active_view = View::Timer,
+            KeyCode::Char('2') => self.active_view = View::Projects,
             KeyCode::Char('s') => {
                 if let Some(entry) = &self.active_entry {
                     match database::stop_entry(entry.id) {
@@ -224,6 +266,27 @@ impl App {
         }
         self.update_state();
         Ok(())
+    }
+
+    fn render_project_view(&mut self, frame: &mut Frame, area: Rect) {
+        let rows = self.projects.iter().map(|p| {
+            Row::new(vec![
+                Cell::from("*").style(Style::new().fg(style::Color::from_str(&p.color).unwrap())),
+                Cell::from(p.name.clone()),
+                Cell::from(p.description.clone()),
+            ])
+        });
+        let column_widths = vec![
+            Constraint::Length(1),
+            Constraint::Length(15),
+            Constraint::Min(0),
+        ];
+        let table = Table::new(rows, column_widths);
+        frame.render_widget(table, area);
+    }
+
+    fn set_error(&mut self, msg: String) {
+        self.error_message = Some(msg);
     }
 }
 
