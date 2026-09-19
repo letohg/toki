@@ -1,8 +1,8 @@
 mod database;
-
 use color_eyre::eyre::Result;
 use core::time::Duration;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use itertools::Itertools;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::DisableMouseCapture;
@@ -12,6 +12,7 @@ use ratatui::crossterm::terminal::{EnterAlternateScreen, enable_raw_mode};
 use ratatui::crossterm::terminal::{LeaveAlternateScreen, disable_raw_mode};
 use ratatui::prelude::*;
 use ratatui::widgets::BorderType;
+use ratatui::widgets::Borders;
 use ratatui::widgets::Cell;
 use ratatui::widgets::Clear;
 use ratatui::widgets::Table;
@@ -26,6 +27,8 @@ use ratatui::{
 };
 use std::io;
 use std::str::FromStr;
+use strum::IntoEnumIterator;
+use strum_macros::EnumIter;
 
 use crate::database::{EntityId, Timestamp, Timezone};
 
@@ -41,6 +44,7 @@ fn format_timestamp(ts: &Timestamp) -> String {
     ts.format("%H:%M").to_string()
 }
 
+#[derive(Debug, PartialEq, EnumIter)]
 enum View {
     Timer,
     Projects,
@@ -96,7 +100,7 @@ impl App {
         let area = frame.area();
         frame.render_widget(&window, area);
         let [top, middle, bottom] = Layout::vertical([
-            Constraint::Length(3),
+            Constraint::Length(2),
             Constraint::Min(0),
             Constraint::Length(1),
         ])
@@ -132,7 +136,11 @@ impl App {
     }
 
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
-        let footer = Block::new().title("Footer");
+        let keybinds = match self.active_view {
+            View::Timer => "Navigate: ⇅  | Start/Stop: s | Edit: e | Quit: q | Switch View: 1/2",
+            View::Projects => "Navigate: ⇅  | Quit: q | Switch View: 1/2",
+        };
+        let footer = Paragraph::new(keybinds);
         frame.render_widget(footer, area);
     }
 
@@ -185,11 +193,25 @@ impl App {
     }
 
     fn render_navbar(&self, frame: &mut Frame, top: Rect) {
-        let navbar = Block::bordered()
-            .border_type(BorderType::Rounded)
-            .title("Navigation");
-        let text = Self::create_navbar(vec!["Home", "Projects"]);
-        frame.render_widget(Paragraph::new(text).block(navbar), top);
+        let navbar = Block::new().borders(Borders::BOTTOM);
+
+        let views: Vec<Span> = View::iter()
+            .enumerate()
+            .map(|(i, view)| {
+                if self.active_view == view {
+                    Span::styled(
+                        format!("[{}] {:?}", i + 1, view),
+                        Style::default().add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    Span::raw(format!("[{}] {:?}", i + 1, view))
+                }
+            })
+            .collect::<Vec<Span>>()
+            .into_iter()
+            .intersperse(Span::raw(" "))
+            .collect();
+        frame.render_widget(Paragraph::new(Line::from(views)).block(navbar), top);
     }
 
     fn create_navbar(items: Vec<&str>) -> Line {
@@ -205,7 +227,6 @@ impl App {
                         Style::default().add_modifier(Modifier::UNDERLINED),
                     ), // Underlined letter
                     Span::raw(rest),
-                    Span::raw(" | ".to_string()),
                 ]
             })
             .flatten()
@@ -226,27 +247,38 @@ impl App {
     }
 
     fn handle_key_event(&mut self, key_event: KeyEvent) -> Result<()> {
-        match key_event.code {
+        let need_state_update: bool = match key_event.code {
             KeyCode::Char('q') => {
                 if self.error_message.is_some() {
                     self.error_message = None;
+                    true
                 } else {
                     self.exit = true;
+                    false
                 }
             }
-            KeyCode::Char('1') => self.active_view = View::Timer,
-            KeyCode::Char('2') => self.active_view = View::Projects,
+            KeyCode::Char('1') => {
+                self.active_view = View::Timer;
+                false
+            }
+            KeyCode::Char('2') => {
+                self.active_view = View::Projects;
+                false
+            }
             KeyCode::Char('s') => {
                 if let Some(entry) = &self.active_entry {
                     match database::stop_entry(entry.id) {
-                        Ok(_) => (),
+                        Ok(_) => {
+                            self.active_entry = None;
+                            true
+                        }
                         Err(_) => {
                             self.error_message = Some(
                                 "The last know running entries has been stopped already".to_owned(),
                             );
+                            false
                         }
-                    };
-                    self.active_entry = None;
+                    }
                 } else {
                     self.active_entry =
                         match database::start_entry(1, "From Rust".to_string(), None) {
@@ -258,12 +290,15 @@ impl App {
                                 );
                                 None
                             }
-                        }
-                };
+                        };
+                    self.active_entry.is_some()
+                }
             }
-            _ => (),
+            _ => false,
+        };
+        if need_state_update {
+            self.update_state();
         }
-        self.update_state();
         Ok(())
     }
 

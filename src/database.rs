@@ -136,8 +136,9 @@ pub fn get_recent_entries(limit: u32) -> Vec<TimeEntry> {
     let mut stmt = con
         .prepare(
             "SELECT id, project_id, task_id, description, start_time, end_time, created_at
-         FROM time_entries WHERE end_time IS NOT NULL
+         FROM time_entries 
          ORDER BY start_time DESC LIMIT ?",
+            // WHERE end_time IS NOT NULL // include the active one in the list
         )
         .unwrap();
 
