@@ -12,6 +12,7 @@ use ratatui::crossterm::terminal::{EnterAlternateScreen, enable_raw_mode};
 use ratatui::crossterm::terminal::{LeaveAlternateScreen, disable_raw_mode};
 use ratatui::prelude::*;
 use ratatui::widgets::BorderType;
+use ratatui::widgets::Clear;
 use ratatui::widgets::Table;
 use ratatui::widgets::{List, Row};
 use ratatui::{
@@ -45,6 +46,7 @@ struct App {
     exit: bool,
     active_entry: Option<database::TimeEntry>,
     recent_entries: Vec<database::TimeEntry>,
+    error_message: Option<String>,
 }
 
 impl App {
@@ -55,6 +57,7 @@ impl App {
             exit: false,
             active_entry,
             recent_entries,
+            error_message: Some("Error".to_string()),
         }
     }
 
@@ -97,6 +100,26 @@ impl App {
             .title("Tracker");
         frame.render_widget(&page, middle);
         self.render_tracker_view(frame, page.inner(middle));
+
+        if let Some(error) = self.error_message.as_ref() {
+            let popup_block = Block::bordered().title("Error").style(Color::Red);
+            let centered_area =
+                area.centered(Constraint::Percentage(60), Constraint::Percentage(20));
+            frame.render_widget(Clear, centered_area);
+            let error_msg = Paragraph::new(error.clone()).block(popup_block).bold();
+            frame.render_widget(error_msg, centered_area);
+        }
+        //     if show_popup {
+        //     let popup_block = Block::bordered().title("Popup");
+        //     let centered_area = area.centered(Constraint::Percentage(60), Constraint::Percentage(20));
+        //     // clears out any background in the area before rendering the popup
+        //     frame.render_widget(Clear, centered_area);
+        //     let paragraph = Paragraph::new("Lorem ipsum").block(popup_block);
+        //     frame.render_widget(paragraph, centered_area);
+        //     // another solution is to use the inner area of the block
+        //     // let inner_area = popup_block.inner(centered_area);
+        //     // frame.render_widget(your_widget, inner_area);
+        // }
     }
 
     fn render_tracker_view(&self, frame: &mut Frame, area: Rect) {
@@ -166,22 +189,36 @@ impl App {
     fn handle_key_event(&mut self, key_event: KeyEvent) -> Result<()> {
         match key_event.code {
             KeyCode::Char('q') => {
-                println!("Exiting");
-                self.exit = true;
+                if self.error_message.is_some() {
+                    self.error_message = None;
+                } else {
+                    self.exit = true;
+                }
             }
             KeyCode::Char('s') => {
                 if let Some(entry) = &self.active_entry {
                     match database::stop_entry(entry.id) {
                         Ok(_) => (),
                         Err(_) => {
-                            println!("The last know running entries has been stopped already")
+                            self.error_message = Some(
+                                "The last know running entries has been stopped already".to_owned(),
+                            );
                         }
                     };
                     self.active_entry = None;
                 } else {
                     self.active_entry =
-                        Some(database::start_entry(1, "From Rust".to_string(), None).unwrap());
-                }
+                        match database::start_entry(1, "From Rust".to_string(), None) {
+                            Ok(e) => Some(e),
+                            Err(_) => {
+                                self.error_message = Some(
+                                    "The last know running entries has been stopped already"
+                                        .to_owned(),
+                                );
+                                None
+                            }
+                        }
+                };
             }
             _ => (),
         }

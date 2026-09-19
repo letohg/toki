@@ -61,7 +61,7 @@ pub fn start_entry(
     // Logic to insert the time entry into the database
     let con: rusqlite::Connection = get_connection();
     let mut entry = TimeEntry::new(project_id, description, task_id);
-    match con.execute(
+    con.execute(
         "INSERT INTO time_entries
             (project_id, task_id, description, start_time, end_time, created_at)
             VALUES (?, ?, ?, ?, NULL, ?)",
@@ -72,10 +72,7 @@ pub fn start_entry(
             &entry.start_time,
             &entry.created_at,
         ),
-    ) {
-        Ok(_) => (),
-        Err(_) => println!("Failed to start new entry!"),
-    }
+    )?;
 
     entry.id = con.last_insert_rowid();
     Ok(entry)
