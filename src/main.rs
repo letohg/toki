@@ -27,21 +27,18 @@ use ratatui::{
 use std::io;
 use std::str::FromStr;
 
-fn delta_hms(start: &str, end: &Option<String>) -> String {
-    let ts = chrono::DateTime::parse_from_rfc3339(start).unwrap();
-    let e = if let Some(e_ts) = end {
-        chrono::DateTime::parse_from_rfc3339(e_ts)
-            .unwrap()
-            .with_timezone(&chrono::Utc)
-    } else {
-        chrono::Utc::now()
-    };
+use crate::database::{EntityId, Timestamp, Timezone};
 
-    let delta: chrono::TimeDelta = e - ts.with_timezone(&chrono::Utc);
+fn delta_hms(start: &Timestamp, end: &Option<Timestamp>) -> String {
+    let delta: chrono::TimeDelta = end.unwrap_or(Timezone::now()) - start;
     let h = delta.num_hours();
     let m = delta.num_minutes() % 60;
     let s = delta.num_seconds() % 60;
     format!("{:02}:{:02}:{:02}", h, m, s)
+}
+
+fn format_timestamp(ts: &Timestamp) -> String {
+    ts.format("%H:%M").to_string()
 }
 
 enum View {
@@ -167,19 +164,21 @@ impl App {
                 Cell::from("*").style(Style::new().fg(project_color)),
                 Cell::from(project.map_or("None".to_string(), |p| p.name.clone())),
                 Cell::from(e.description.clone()),
-                Cell::from(format!("{}", e.start_time)),
                 Cell::from(format!(
-                    "{}",
-                    e.end_time.clone().unwrap_or("Running".to_owned())
+                    "{} - {}",
+                    format_timestamp(&e.start_time),
+                    e.end_time
+                        .map_or("Running".to_owned(), |ts| format_timestamp(&ts))
                 )),
-                Cell::from(format!("{}", delta_hms(&e.start_time, &e.end_time))),
+                Cell::from(delta_hms(&e.start_time, &e.end_time)),
             ])
         });
         let column_widths = vec![
-            Constraint::Length(15),
+            Constraint::Length(1),
             Constraint::Length(15),
             Constraint::Min(0),
-            Constraint::Min(0),
+            Constraint::Length(16), // start time - end time
+            Constraint::Length(8),  // duration
         ];
         let table = Table::new(rows, column_widths);
         frame.render_widget(table, entries_area);

@@ -2,15 +2,27 @@ use chrono::Timelike;
 use resolve_path::PathResolveExt;
 use rusqlite::OptionalExtension;
 
-type EntityId = i64;
+pub type EntityId = i64;
+pub type Timezone = chrono::Utc;
+pub type Timestamp = chrono::DateTime<Timezone>;
 
 fn get_now_utc_py() -> String {
     let now = chrono::Utc::now();
-    if now.nanosecond() == 0 {
-        now.to_rfc3339_opts(chrono::SecondsFormat::Secs, false)
+    ts_to_str(now)
+}
+
+fn ts_to_str(ts: Timestamp) -> String {
+    if ts.nanosecond() == 0 {
+        ts.to_rfc3339_opts(chrono::SecondsFormat::Secs, false)
     } else {
-        now.to_rfc3339_opts(chrono::SecondsFormat::Millis, false)
+        ts.to_rfc3339_opts(chrono::SecondsFormat::Millis, false)
     }
+}
+
+fn string_to_ts(s: String) -> Timestamp {
+    chrono::DateTime::parse_from_rfc3339(s.as_str())
+        .unwrap()
+        .with_timezone(&chrono::Utc)
 }
 
 pub struct Project {
@@ -18,7 +30,7 @@ pub struct Project {
     pub name: String,
     pub color: String, // hex color
     pub description: String,
-    pub create_at: String,
+    pub created_at: Timestamp,
 }
 
 pub struct TimeEntry {
@@ -26,20 +38,20 @@ pub struct TimeEntry {
     pub project_id: EntityId,
     pub task_id: Option<EntityId>,
     pub description: String,
-    pub start_time: String,
-    pub end_time: Option<String>,
-    pub created_at: String,
+    pub start_time: Timestamp,
+    pub end_time: Option<Timestamp>,
+    pub created_at: Timestamp,
 }
 
 impl TimeEntry {
     pub fn new(project_id: EntityId, description: String, task_id: Option<EntityId>) -> Self {
-        let now = get_now_utc_py();
+        let now = chrono::Utc::now();
         TimeEntry {
             id: 0, // This should be set by the database when inserting
             project_id,
             task_id,
             description,
-            start_time: now.clone(),
+            start_time: now,
             end_time: None,
             created_at: now,
         }
@@ -77,8 +89,8 @@ pub fn start_entry(
             &entry.project_id,
             &entry.task_id,
             &entry.description,
-            &entry.start_time,
-            &entry.created_at,
+            ts_to_str(entry.start_time),
+            ts_to_str(entry.created_at),
         ),
     )?;
 
@@ -108,9 +120,9 @@ pub fn get_running_entry() -> Option<TimeEntry> {
                 project_id: row.get(1)?,
                 task_id: row.get(2)?,
                 description: row.get(3)?,
-                start_time: row.get(4)?,
-                end_time: row.get(5).unwrap_or(None),
-                created_at: row.get(6)?,
+                start_time: string_to_ts(row.get(4)?),
+                end_time: row.get(5).map_or(None, |ts| Some(string_to_ts(ts))),
+                created_at: string_to_ts(row.get(6)?),
             })
         },
     )
@@ -136,9 +148,9 @@ pub fn get_recent_entries(limit: u32) -> Vec<TimeEntry> {
                 project_id: row.get(1)?,
                 task_id: row.get(2)?,
                 description: row.get(3)?,
-                start_time: row.get(4)?,
-                end_time: row.get(5).unwrap_or(None),
-                created_at: row.get(6)?,
+                start_time: string_to_ts(row.get(4)?),
+                end_time: row.get(5).map_or(None, |ts| Some(string_to_ts(ts))),
+                created_at: string_to_ts(row.get(6)?),
             })
         })
         .unwrap();
@@ -156,7 +168,7 @@ pub fn get_projects() -> rusqlite::Result<Vec<Project>> {
             name: row.get(1)?,
             color: row.get(2)?,
             description: row.get(3)?,
-            create_at: row.get(4)?,
+            created_at: string_to_ts(row.get(4)?),
         })
     })?;
     Ok(projects.filter_map(|p| p.ok()).collect())
