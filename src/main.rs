@@ -1,5 +1,6 @@
 use color_eyre::eyre::Result;
 use core::time::Duration;
+use ratatui::widgets::BorderType;
 use std::io;
 
 mod database;
@@ -21,17 +22,33 @@ use ratatui::{
     widgets::Block,
     widgets::Paragraph,
 };
+
+fn delta_hms(timestamp: &str) -> String {
+    let ts = chrono::DateTime::parse_from_rfc3339(timestamp).unwrap();
+    let now = chrono::Utc::now();
+    let delta: chrono::TimeDelta = now - ts.with_timezone(&chrono::Utc);
+    let h = delta.num_hours();
+    let m = delta.num_minutes() % 60;
+    let s = delta.num_seconds() % 60;
+    format!("{:02}:{:02}:{:02}", h, m, s)
+}
+
 struct App {
     exit: bool,
+    active_entry: Option<database::TimeEntry>,
 }
 
 impl App {
     pub fn new() -> Self {
-        Self { exit: false }
+        Self {
+            exit: false,
+            active_entry: None,
+        }
     }
 
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
         while !self.exit {
+            self.active_entry = database::Database::new().get_running_entry();
             terminal.draw(|frame| self.draw(frame))?;
             self.handle_events()?;
         }
@@ -43,21 +60,43 @@ impl App {
             .title("TimeTracker");
         let area = frame.area();
         let inner_area = block.inner(area);
-        let constraints = Constraint::from_percentages([25, 75]);
-        let splits = Layout::default().constraints(constraints).split(inner_area);
-        let top = splits[0];
-        let bottom = splits[1];
+        let [top, middle, bottom] = Layout::vertical([
+            Constraint::Length(3),
+            Constraint::Min(0),
+            Constraint::Length(3),
+        ])
+        .areas(inner_area);
 
         let navbar = Block::bordered()
-            .border_type(ratatui::widgets::BorderType::Rounded)
+            .border_type(BorderType::Rounded)
             .title("Navigation");
         let text = Self::create_navbar(vec!["Home", "Projects"]);
         frame.render_widget(Paragraph::new(text).block(navbar), top);
 
+        let footer = Block::bordered().border_type(BorderType::Rounded);
+        frame.render_widget(footer, bottom);
+
         let page = Block::bordered()
-            .border_type(ratatui::widgets::BorderType::Rounded)
-            .title("Page");
-        frame.render_widget(page, bottom);
+            .border_type(BorderType::Rounded)
+            .title("Tracker");
+        frame.render_widget(&page, middle);
+        if let Some(entry) = &self.active_entry {
+            let text = format!(
+                "Tracking: {} | {} | {}",
+                entry.project_id,
+                entry.description,
+                delta_hms(&entry.start_time)
+            );
+            let p = Paragraph::new(text)
+                .style(style::Color::Yellow)
+                .left_aligned();
+            frame.render_widget(p, page.inner(middle));
+        } else {
+            let p = Paragraph::new("No running entry")
+                .style(style::Color::Yellow)
+                .left_aligned();
+            frame.render_widget(p, page.inner(middle));
+        }
     }
 
     fn create_navbar(items: Vec<&str>) -> Line {
@@ -97,6 +136,16 @@ impl App {
             KeyCode::Char('q') => {
                 println!("Exiting");
                 self.exit = true;
+            }
+            KeyCode::Char('s') => {
+                let db = database::Database::new();
+                if let Some(entry) = &self.active_entry {
+                    db.stop_entry(entry.id);
+                    self.active_entry = None;
+                } else {
+                    self.active_entry =
+                        Some(db.start_entry(1, "From Rust".to_string(), None).unwrap());
+                }
             }
             _ => (),
         }
