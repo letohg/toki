@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::style::{self, Color};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders};
+use ratatui::text::{Line, Span, ToLine};
+use ratatui::widgets::{Block, BorderType, Borders, Wrap};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
@@ -132,85 +132,47 @@ impl Timer {
 }
 
 fn render_tracker(frame: &mut Frame<'_>, tracker_area: Rect, tracking_info: Option<TrackingInfo>) {
-    let [timer_area, project_area, task_area, description_area] = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Length(1),
-    ])
-    .areas(tracker_area);
-
-    frame.render_widget(Block::new().borders(Borders::BOTTOM), tracker_area);
+    let columns = [Constraint::Length(14), Constraint::Min(1)];
+    let [label_area, values_area] = Layout::horizontal(columns).areas(tracker_area);
 
     let status = match tracking_info {
         Some(_) => Span::styled("TRACKING", style::Color::Green),
         None => Span::styled("NOT TRACKING", style::Color::LightRed),
     };
-    let duration = Span::styled(
+    frame.render_widget(
+        Paragraph::new(vec![
+            status.to_line(),
+            Line::from("Project:"),
+            Line::from("Task:"),
+            Line::from("Description:"),
+        ])
+        .wrap(Wrap { trim: true }),
+        label_area,
+    );
+
+    let duration = Line::styled(
         tracking_info
             .as_ref()
             .map_or("".to_owned(), |i| i.duration.clone()),
         style::Color::Green,
     );
-
-    let columns = [Constraint::Length(14), Constraint::Min(9)];
-    let [a1, a2] = Layout::horizontal(columns).areas(timer_area);
-    frame.render_widget(Paragraph::new(status), a1);
-    frame.render_widget(Paragraph::new(duration), a2);
-
-    let [a1, a2] = Layout::horizontal(columns).areas(project_area);
-    frame.render_widget(Paragraph::new("Project:"), a1);
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![Span::raw(
-            tracking_info
-                .as_ref()
-                .map_or("".to_owned(), |i| i.project_name.clone()),
-        )])),
-        a2,
+    let project_name = Line::from(
+        tracking_info
+            .as_ref()
+            .map_or("".to_owned(), |i| i.project_name.clone()),
     );
-    // frame.render_widget(
-    //     Paragraph::new(Line::from(vec![
-    //         Span::raw("Project: "),
-    //         Span::raw(
-    //             tracking_info
-    //                 .as_ref()
-    //                 .map_or("".to_owned(), |i| i.project_name.clone()),
-    //         ),
-    //     ])),
-    //     project_area,
-    // );
-
-    let [a1, a2] = Layout::horizontal(columns).areas(task_area);
-    frame.render_widget(Paragraph::new("Task:"), a1);
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![Span::raw(
-            tracking_info
-                .as_ref()
-                .map_or("".to_owned(), |i| i.task.clone()),
-        )])),
-        a2,
+    let task_name = Line::from(
+        tracking_info
+            .as_ref()
+            .map_or("".to_owned(), |i| i.task.clone()),
     );
-    // frame.render_widget(
-    //     Paragraph::new(Line::from(vec![
-    //         Span::raw("Task: "),
-    //         Span::raw(
-    //             tracking_info
-    //                 .as_ref()
-    //                 .map_or("".to_owned(), |i| i.task.clone()),
-    //         ),
-    //     ])),
-    //     task_area,
-    // );
-    let [a1, a2] = Layout::horizontal(columns).areas(description_area);
-    frame.render_widget(Paragraph::new("Description:"), a1);
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![Span::raw(
-            tracking_info.map_or("".to_owned(), |i| i.description),
-        )])),
-        a2,
+    let description = Line::from(
+        tracking_info
+            .as_ref()
+            .map_or("".to_owned(), |i| i.description.clone()),
     );
-    // frame.render_widget(
-    //     Paragraph::new(tracking_info.map_or("".to_owned(), |i| i.description)),
-    //     description_area,
-    // );
+    frame.render_widget(
+        Paragraph::new(vec![duration, project_name, task_name, description]),
+        values_area,
+    );
 }
