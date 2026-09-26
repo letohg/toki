@@ -1,3 +1,4 @@
+use crossterm::event::KeyEvent;
 use ratatui::style;
 use ratatui::widgets::{Cell, Row, Table};
 use ratatui::{Frame, layout::Rect};
@@ -36,5 +37,9 @@ impl Project {
         ];
         let table = Table::new(rows, column_widths);
         frame.render_widget(table, area);
+    }
+
+    pub fn handle_key_event(&mut self, key_event: KeyEvent) -> bool {
+        false
     }
 }

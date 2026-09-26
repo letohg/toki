@@ -29,7 +29,6 @@ pub struct App {
     db: database::Database,
     exit: bool,
     active_view: View,
-    active_entry: Option<database::TimeEntry>,
     error_message: Option<String>,
     // views
     timer_view: views::timer::Timer,
@@ -43,7 +42,6 @@ impl App {
 
             exit: false,
             active_view: View::Timer,
-            active_entry: None,
             error_message: None,
             timer_view: views::timer::Timer::new(),
             project_view: views::projects::Project::new(),
@@ -182,7 +180,7 @@ impl App {
     }
 
     fn handle_key_event(&mut self, key_event: KeyEvent) -> Result<()> {
-        let need_state_update: bool = match key_event.code {
+        let mut need_state_update: bool = match key_event.code {
             KeyCode::Char('q') => {
                 if self.error_message.is_some() {
                     self.error_message = None;
@@ -200,35 +198,29 @@ impl App {
                 self.active_view = View::Projects;
                 true
             }
-            KeyCode::Char('s') => {
-                if let Some(entry) = &self.active_entry {
-                    match self.db.stop_entry(entry.id) {
-                        Ok(_) => {
-                            self.active_entry = None;
-                            true
+            // KeyCode::Char('s') => {}
+            _ => false,
+        };
+        need_state_update |= match self.active_view {
+            View::Timer => match self.timer_view.handle_key_event(key_event) {
+                Some(action) => {
+                    match action {
+                        views::timer::TimerAction::StartTracking(
+                            project_id,
+                            description,
+                            task_id,
+                        ) => {
+                            let _ = self.db.start_entry(project_id, description, task_id);
                         }
-                        Err(_) => {
-                            self.error_message = Some(
-                                "The last know running entries has been stopped already".to_owned(),
-                            );
-                            false
-                        }
-                    }
-                } else {
-                    self.active_entry = match self.db.start_entry(1, "From Rust".to_string(), None)
-                    {
-                        Ok(e) => Some(e),
-                        Err(_) => {
-                            self.error_message = Some(
-                                "The last know running entries has been stopped already".to_owned(),
-                            );
-                            None
+                        views::timer::TimerAction::StopTracking(entry_id) => {
+                            let _ = self.db.stop_entry(entry_id);
                         }
                     };
-                    self.active_entry.is_some()
+                    true
                 }
-            }
-            _ => false,
+                None => false,
+            },
+            View::Projects => self.project_view.handle_key_event(key_event),
         };
         if need_state_update {
             self.update_state();
