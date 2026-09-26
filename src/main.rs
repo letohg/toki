@@ -1,4 +1,6 @@
 mod database;
+mod views;
+
 use color_eyre::eyre::Result;
 use core::time::Duration;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
@@ -51,6 +53,7 @@ enum View {
 }
 
 struct App {
+    db: database::Database,
     exit: bool,
     active_view: View,
     active_entry: Option<database::TimeEntry>,
@@ -62,6 +65,7 @@ struct App {
 impl App {
     pub fn new() -> Self {
         let mut app = Self {
+            db: database::Database::new().unwrap(),
             exit: false,
             active_view: View::Timer,
             active_entry: None,
@@ -81,9 +85,9 @@ impl App {
         Ok(())
     }
     fn update_state(&mut self) {
-        self.active_entry = database::get_running_entry();
-        self.recent_entries = database::get_recent_entries(10);
-        match database::get_projects() {
+        self.active_entry = self.db.get_running_entry();
+        self.recent_entries = self.db.get_recent_entries(10);
+        match self.db.get_projects() {
             Ok(projects) => {
                 self.projects = projects;
             }
@@ -267,7 +271,7 @@ impl App {
             }
             KeyCode::Char('s') => {
                 if let Some(entry) = &self.active_entry {
-                    match database::stop_entry(entry.id) {
+                    match self.db.stop_entry(entry.id) {
                         Ok(_) => {
                             self.active_entry = None;
                             true
@@ -281,7 +285,7 @@ impl App {
                     }
                 } else {
                     self.active_entry =
-                        match database::start_entry(1, "From Rust".to_string(), None) {
+                        match self.db.start_entry(1, "From Rust".to_string(), None) {
                             Ok(e) => Some(e),
                             Err(_) => {
                                 self.error_message = Some(
