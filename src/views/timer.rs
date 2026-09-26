@@ -1,6 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::style::{self, Color};
 use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, BorderType, Borders};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
@@ -56,7 +57,7 @@ impl Timer {
         let [tracker_area, entries_area] =
             Layout::vertical([Constraint::Length(5), Constraint::Min(0)]).areas(area);
 
-        let tracking_info: TrackingInfo = match &self.active_entry {
+        let tracking_info = match &self.active_entry {
             Some(entry) => {
                 let project = self.projects.iter().find(|p| p.id == entry.project_id);
                 let project_color = project.map_or(style::Color::Yellow, |p| {
@@ -66,55 +67,17 @@ impl Timer {
                 let duration = delta_hms(&entry.start_time, &entry.end_time);
                 let project_name = project.map_or("None".to_string(), |p| p.name.clone());
                 let description = entry.description.clone();
-                TrackingInfo {
+                Some(TrackingInfo {
                     duration,
                     project_name,
                     project_color,
                     task: "TODO".to_owned(),
                     description,
-                }
+                })
             }
-            None => TrackingInfo {
-                duration: "--:--:--".to_owned(),
-                project_name: "[....]".to_owned(),
-                project_color: style::Color::White,
-                task: "[....]".to_owned(),
-                description: "[....]".to_owned(),
-            },
+            None => None,
         };
-        let status = Span::styled(
-            match tracking_info.duration == "--:--:--" {
-                true => "Not Tracking",
-                false => "TRACKING",
-            },
-            style::Color::Cyan,
-        )
-        .into_centered_line();
-        let duration =
-            Span::styled(tracking_info.duration, style::Color::Cyan).into_centered_line();
-        let info = vec![
-            Row::new(vec![
-                Cell::from("Project"),
-                Cell::from(tracking_info.project_name),
-            ])
-            .style(style::Style::new().fg(tracking_info.project_color)),
-            Row::new(vec![Cell::from("Task"), Cell::from(tracking_info.task)]),
-            Row::new(vec![
-                Cell::from("Description:"),
-                Cell::from(tracking_info.description),
-            ]),
-        ];
-        let [a1, a2, a3] = Layout::vertical([
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(3),
-        ])
-        .areas(tracker_area);
-        let table = Table::new(info, vec![Constraint::Length(13), Constraint::Min(7)]);
-
-        frame.render_widget(duration, a1);
-        frame.render_widget(status, a2);
-        frame.render_widget(table, a3);
+        render_tracker(frame, tracker_area, tracking_info);
 
         let rows = self.recent_entries.iter().map(|e| {
             let project = self.projects.iter().find(|p| p.id == e.project_id);
@@ -166,4 +129,58 @@ impl Timer {
             _ => None,
         }
     }
+}
+
+fn render_tracker(frame: &mut Frame<'_>, tracker_area: Rect, tracking_info: Option<TrackingInfo>) {
+    let [timer_area, project_area, task_area, description_area] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .areas(tracker_area);
+
+    frame.render_widget(Block::new().borders(Borders::BOTTOM), tracker_area);
+
+    let status = match tracking_info {
+        Some(_) => Span::styled("TRACKING", style::Color::Green),
+        None => Span::styled("NOT TRACKING", style::Color::LightRed),
+    };
+    let duration = Span::styled(
+        tracking_info
+            .as_ref()
+            .map_or("".to_owned(), |i| i.duration.clone()),
+        style::Color::Cyan,
+    );
+    let [a1, a2] =
+        Layout::horizontal([Constraint::Length(14), Constraint::Length(9)]).areas(timer_area);
+    frame.render_widget(Paragraph::new(status).left_aligned(), a1);
+    frame.render_widget(Paragraph::new(duration).left_aligned(), a2);
+
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::raw("Project: "),
+            Span::raw(
+                tracking_info
+                    .as_ref()
+                    .map_or("".to_owned(), |i| i.project_name.clone()),
+            ),
+        ])),
+        project_area,
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::raw("Task: "),
+            Span::raw(
+                tracking_info
+                    .as_ref()
+                    .map_or("".to_owned(), |i| i.task.clone()),
+            ),
+        ])),
+        task_area,
+    );
+    frame.render_widget(
+        Paragraph::new(tracking_info.map_or("".to_owned(), |i| i.description)),
+        description_area,
+    );
 }
