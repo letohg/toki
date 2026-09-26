@@ -71,7 +71,7 @@ impl Timer {
                     duration,
                     project_name,
                     project_color,
-                    task: "TODO".to_owned(),
+                    task: "-".to_owned(),
                     description,
                 })
             }
@@ -150,37 +150,67 @@ fn render_tracker(frame: &mut Frame<'_>, tracker_area: Rect, tracking_info: Opti
         tracking_info
             .as_ref()
             .map_or("".to_owned(), |i| i.duration.clone()),
-        style::Color::Cyan,
+        style::Color::Green,
     );
-    let [a1, a2] =
-        Layout::horizontal([Constraint::Length(14), Constraint::Length(9)]).areas(timer_area);
-    frame.render_widget(Paragraph::new(status).left_aligned(), a1);
-    frame.render_widget(Paragraph::new(duration).left_aligned(), a2);
 
+    let columns = [Constraint::Length(14), Constraint::Min(9)];
+    let [a1, a2] = Layout::horizontal(columns).areas(timer_area);
+    frame.render_widget(Paragraph::new(status), a1);
+    frame.render_widget(Paragraph::new(duration), a2);
+
+    let [a1, a2] = Layout::horizontal(columns).areas(project_area);
+    frame.render_widget(Paragraph::new("Project:"), a1);
     frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::raw("Project: "),
-            Span::raw(
-                tracking_info
-                    .as_ref()
-                    .map_or("".to_owned(), |i| i.project_name.clone()),
-            ),
-        ])),
-        project_area,
+        Paragraph::new(Line::from(vec![Span::raw(
+            tracking_info
+                .as_ref()
+                .map_or("".to_owned(), |i| i.project_name.clone()),
+        )])),
+        a2,
     );
+    // frame.render_widget(
+    //     Paragraph::new(Line::from(vec![
+    //         Span::raw("Project: "),
+    //         Span::raw(
+    //             tracking_info
+    //                 .as_ref()
+    //                 .map_or("".to_owned(), |i| i.project_name.clone()),
+    //         ),
+    //     ])),
+    //     project_area,
+    // );
+
+    let [a1, a2] = Layout::horizontal(columns).areas(task_area);
+    frame.render_widget(Paragraph::new("Task:"), a1);
     frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::raw("Task: "),
-            Span::raw(
-                tracking_info
-                    .as_ref()
-                    .map_or("".to_owned(), |i| i.task.clone()),
-            ),
-        ])),
-        task_area,
+        Paragraph::new(Line::from(vec![Span::raw(
+            tracking_info
+                .as_ref()
+                .map_or("".to_owned(), |i| i.task.clone()),
+        )])),
+        a2,
     );
+    // frame.render_widget(
+    //     Paragraph::new(Line::from(vec![
+    //         Span::raw("Task: "),
+    //         Span::raw(
+    //             tracking_info
+    //                 .as_ref()
+    //                 .map_or("".to_owned(), |i| i.task.clone()),
+    //         ),
+    //     ])),
+    //     task_area,
+    // );
+    let [a1, a2] = Layout::horizontal(columns).areas(description_area);
+    frame.render_widget(Paragraph::new("Description:"), a1);
     frame.render_widget(
-        Paragraph::new(tracking_info.map_or("".to_owned(), |i| i.description)),
-        description_area,
+        Paragraph::new(Line::from(vec![Span::raw(
+            tracking_info.map_or("".to_owned(), |i| i.description),
+        )])),
+        a2,
     );
+    // frame.render_widget(
+    //     Paragraph::new(tracking_info.map_or("".to_owned(), |i| i.description)),
+    //     description_area,
+    // );
 }
