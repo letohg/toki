@@ -138,7 +138,7 @@ impl Tracker {
                     &mut self.project_list_state,
                 );
             }
-            StartTrackingState::TaskSelection
+            StartTrackingState::TaskSelection // TODO:
             | StartTrackingState::EnterDescription
             | StartTrackingState::ReviewBeforeStart => {
                 let columns = [Constraint::Length(4), Constraint::Length(1)];
@@ -165,41 +165,23 @@ impl Tracker {
                     label_area,
                 );
 
-                let project_name = ListItem::new(Line::from(vec![
-                    "[ ".into(),
-                    match &self.new_entry_to_start.project {
-                        Some(p) => p.name.clone().into(),
-                        None => Span::raw("select project...").italic(),
-                    },
-                    " ]".into(),
-                ]));
-                let task_name = ListItem::new(Line::from(vec![
-                    "[ ".into(),
-                    Span::raw("select task...").italic(),
-                    " ]".into(),
-                ]));
-                let desc = format!(
-                    "{}{}",
-                    self.new_entry_to_start.description,
-                    if matches!(
+                let project_name = create_input_list_item(
+                    "select project...",
+                    self.new_entry_to_start
+                        .project
+                        .as_ref()
+                        .map(|p| p.name.clone()),
+                );
+                let task_name = create_input_list_item("select task...", None);
+                let desc = format_as_active_text_input(
+                    &self.new_entry_to_start.description,
+                    matches!(
                         self.start_tracker_mode,
                         StartTrackingState::EnterDescription
-                    ) {
-                        "│"
-                    } else {
-                        ""
-                    }
+                    ),
                 );
 
-                let description = ListItem::new(Line::from(vec![
-                    "[ ".into(),
-                    if desc.is_empty() {
-                        Span::raw("add description...").italic()
-                    } else {
-                        Span::raw(desc)
-                    },
-                    Span::raw(" ]"),
-                ]));
+                let description = create_input_list_item("add description...", desc.into());
                 frame.render_stateful_widget(
                     List::new(vec![project_name, task_name, description])
                         .highlight_style(Style::default().bg(Color::DarkGray))
@@ -466,4 +448,20 @@ impl Tracker {
         frame.render_widget(&block, area);
         let stats_area = block.inner(area);
     }
+}
+
+fn format_as_active_text_input(text: &String, editing_active: bool) -> String {
+    format!("{}{}", text, if editing_active { "│" } else { "" })
+}
+
+fn create_input_list_item(placeholder: &str, content: Option<String>) -> ListItem<'_> {
+    ListItem::new(Line::from(vec![
+        "[ ".into(),
+        match content {
+            None => Span::raw(placeholder).italic(),
+            Some(c) if c.is_empty() => Span::raw(placeholder).italic(),
+            Some(c) => Span::raw(c),
+        },
+        Span::raw(" ]"),
+    ]))
 }
