@@ -30,11 +30,13 @@ enum StartTrackingState {
 
 enum Mode {
     Main,
-    StartTracker,
+    StartNewEntry,
+    EditActiveEntry,
 }
 
 pub enum TrackerAction {
     StartTracking(EntityId, String, Option<EntityId>),
+    UpdateEntry(Option<database::TimeEntry>),
     StopTracking(EntityId),
     ConsumedKey,
 }
@@ -100,7 +102,7 @@ impl Tracker {
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
         match self.mode {
             Mode::Main => self.render_main_view(frame, area),
-            Mode::StartTracker => {
+            Mode::EditActiveEntry | Mode::StartNewEntry => {
                 self.render_main_view(frame, area);
                 self.render_start_tracker_form(frame, area);
             }
@@ -284,7 +286,8 @@ impl Tracker {
     pub fn handle_key_event(&mut self, key_event: KeyEvent) -> Option<TrackerAction> {
         match self.mode {
             Mode::Main => self.handle_key_events_in_normal_mode(key_event),
-            Mode::StartTracker => self.handle_key_events_start_tracking(key_event),
+            Mode::StartNewEntry => self.handle_key_events_start_tracking(key_event),
+            Mode::EditActiveEntry => self.handle_key_events_start_tracking(key_event),
         }
     }
 
@@ -295,14 +298,11 @@ impl Tracker {
                 Some(TrackerAction::StopTracking(entry.id))
             }
             KeyCode::Char('s') => {
-                self.mode = Mode::StartTracker;
+                self.mode = Mode::StartNewEntry;
                 Some(ConsumedKey)
             }
             KeyCode::Char('e') => {
-                // open edit entry mode
-                // Project:     [...]
-                // Task:        [...]
-                // Description: [...]
+                self.mode = Mode::EditActiveEntry;
                 Some(ConsumedKey)
             }
             _ => None,
@@ -363,12 +363,19 @@ impl Tracker {
                     Some(ConsumedKey)
                 }
                 KeyCode::Char('s') if self.new_entry_to_start.project.is_some() => {
+                    if matches!(self.mode, Mode::StartNewEntry) {
+                        self.mode = Mode::Main;
+                        return Some(StartTracking(
+                            self.new_entry_to_start.project.as_ref().unwrap().id,
+                            self.new_entry_to_start.description.clone(),
+                            None,
+                        ));
+                    }
+                    Some(TrackerAction::ConsumedKey)
+                }
+                KeyCode::Char('d') if matches!(self.mode, Mode::EditActiveEntry) => {
                     self.mode = Mode::Main;
-                    Some(StartTracking(
-                        self.new_entry_to_start.project.as_ref().unwrap().id,
-                        self.new_entry_to_start.description.clone(),
-                        None,
-                    ))
+                    Some(TrackerAction::UpdateEntry(self.active_entry.clone()))
                 }
                 KeyCode::Enter => {
                     self.start_tracker_mode = StartTrackingState::from_usize(

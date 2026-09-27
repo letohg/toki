@@ -34,6 +34,7 @@ pub struct Project {
     pub created_at: Timestamp,
 }
 
+#[derive(Clone)]
 pub struct TimeEntry {
     pub id: EntityId,
     pub project_id: EntityId,
