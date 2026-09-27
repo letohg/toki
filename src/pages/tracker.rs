@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::style::{self, Color, Stylize};
 use ratatui::text::{Line, Span, ToLine};
-use ratatui::widgets::{Block, Wrap};
+use ratatui::widgets::{Block, Borders, Padding, Wrap};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
@@ -54,17 +54,28 @@ impl Tracker {
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect) {
-        let [tracker_area, entries_area] =
+        let [tracker_stats_area, entries_area] =
             Layout::vertical([Constraint::Length(6), Constraint::Min(3)]).areas(area);
 
+        let [tracker_area, _, today_stats_area] = Layout::horizontal([
+            Constraint::Percentage(50),
+            Constraint::Length(1),
+            Constraint::Percentage(50),
+        ])
+        .areas(tracker_stats_area);
         self.render_tracker(frame, tracker_area);
+        self.render_todays_stats(frame, today_stats_area);
         self.render_recent_entries(frame, entries_area);
     }
 
     fn render_recent_entries(&self, frame: &mut Frame<'_>, area: Rect) {
-        let recent_entries_block = Block::new().title("RECENT ENTRIES");
-        frame.render_widget(&recent_entries_block, area);
-        let entries_area = recent_entries_block.inner(area);
+        let block = Block::new().padding(Padding::symmetric(1, 1));
+        let [title_area, entries_area] =
+            Layout::vertical([Constraint::Length(1), Constraint::Min(3)]).areas(block.inner(area));
+        frame.render_widget(Paragraph::new("RECENT ENTRIES"), title_area);
+        let table_block = Block::new().borders(Borders::TOP);
+        frame.render_widget(&table_block, entries_area);
+        let table_area = table_block.inner(entries_area);
 
         let headings = Row::new(
             ["Project", "Task", "Description", "Time", "Total"]
@@ -104,7 +115,7 @@ impl Tracker {
             Constraint::Length(8),  // duration
         ];
         let table = Table::new(rows, column_widths).header(headings);
-        frame.render_widget(table, entries_area);
+        frame.render_widget(table, table_area);
     }
 
     fn get_active_entry_info(&self) -> Option<TrackingInfo> {
@@ -159,13 +170,18 @@ impl Tracker {
     fn render_tracker(&self, frame: &mut Frame<'_>, area: Rect) {
         let info = self.get_active_entry_info();
 
-        let tracker_block =
-            Block::bordered().title(if info.is_some() { "TRACKING" } else { "READY" });
-        let [a1, _] = Layout::horizontal([Constraint::Length(50), Constraint::Min(0)]).areas(area);
-        let tracker_area = tracker_block.inner(a1);
+        let block = Block::bordered()
+            .title(if info.is_some() {
+                " TRACKING "
+            } else {
+                " READY "
+            })
+            .border_type(ratatui::widgets::BorderType::Rounded)
+            .padding(Padding::horizontal(1));
+        let tracker_area = block.inner(area);
 
         if info.is_none() {
-            frame.render_widget(&tracker_block, a1);
+            frame.render_widget(&block, area);
             frame.render_widget(
                 Paragraph::new(vec![
                     "No timer is runnig".into(),
@@ -179,7 +195,7 @@ impl Tracker {
             return;
         }
 
-        frame.render_widget(&tracker_block, a1);
+        frame.render_widget(&block, area);
 
         let columns = [Constraint::Length(14), Constraint::Min(1)];
         let [time_area, info_area] =
@@ -211,5 +227,14 @@ impl Tracker {
             Paragraph::new(vec![project_name, task_name, description]),
             values_area,
         );
+    }
+
+    fn render_todays_stats(&self, frame: &mut Frame<'_>, area: Rect) {
+        let block = Block::bordered()
+            .border_type(ratatui::widgets::BorderType::Rounded)
+            .title(" TODAY ")
+            .padding(Padding::horizontal(1));
+        frame.render_widget(&block, area);
+        let stats_area = block.inner(area);
     }
 }

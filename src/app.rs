@@ -5,6 +5,7 @@ use itertools::Itertools;
 use ratatui::prelude::*;
 use ratatui::widgets::Borders;
 use ratatui::widgets::Clear;
+use ratatui::widgets::Padding;
 use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Layout},
@@ -69,22 +70,24 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
-        // let window = Block::bordered()
-        //     .border_type(ratatui::widgets::BorderType::Rounded)
-        //     .title("TimeTracker");
+        let window = Block::bordered()
+            .border_type(ratatui::widgets::BorderType::Rounded)
+            .padding(Padding::horizontal(1))
+            .title("Toki")
+            .title_alignment(HorizontalAlignment::Center);
         let area = frame.area();
-        // frame.render_widget(&window, area);
+        frame.render_widget(&window, area);
         let [top, middle, bottom] = Layout::vertical([
-            Constraint::Length(1),
+            Constraint::Length(2),
             Constraint::Min(0),
-            Constraint::Length(1),
+            Constraint::Length(2),
         ])
-        .areas(area);
+        .areas(window.inner(area));
 
         self.render_navbar(frame, top);
         self.render_page(frame, middle);
         self.render_footer(frame, bottom);
-        self.render_popup(frame, area);
+        self.render_popup(frame, window.inner(area));
     }
 
     fn render_popup(&mut self, frame: &mut Frame, area: Rect) {
@@ -119,8 +122,9 @@ impl App {
             }
             Page::Projects(_) => "Navigate: ⇅  | Quit: q | Switch View: 1/2",
         };
+        let [_, bottom] = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(area);
         let footer = Paragraph::new(keybinds);
-        frame.render_widget(footer, area);
+        frame.render_widget(footer, bottom);
     }
 
     fn render_navbar(&self, frame: &mut Frame, top: Rect) {
