@@ -69,17 +69,17 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
-        let window = Block::bordered()
-            .border_type(ratatui::widgets::BorderType::Rounded)
-            .title("TimeTracker");
+        // let window = Block::bordered()
+        //     .border_type(ratatui::widgets::BorderType::Rounded)
+        //     .title("TimeTracker");
         let area = frame.area();
-        frame.render_widget(&window, area);
+        // frame.render_widget(&window, area);
         let [top, middle, bottom] = Layout::vertical([
-            Constraint::Length(2),
+            Constraint::Length(1),
             Constraint::Min(0),
             Constraint::Length(1),
         ])
-        .areas(window.inner(area));
+        .areas(area);
 
         self.render_navbar(frame, top);
         self.render_page(frame, middle);
@@ -99,15 +99,15 @@ impl App {
     }
 
     fn render_page(&mut self, frame: &mut Frame, area: Rect) {
-        let page = Block::bordered()
-            // .border_type(BorderType::Rounded)
-            .borders(Borders::BOTTOM | Borders::TOP)
-            .title("Timer");
-        frame.render_widget(&page, area);
+        // let page = Block::bordered()
+        //     // .border_type(BorderType::Rounded)
+        //     .borders(Borders::BOTTOM | Borders::TOP)
+        //     .title("Timer");
+        // frame.render_widget(&page, area);
 
         match &self.active_page {
-            Page::Tracker(p) => p.render(frame, page.inner(area)),
-            Page::Projects(p) => p.render(frame, page.inner(area)),
+            Page::Tracker(p) => p.render(frame, area),
+            Page::Projects(p) => p.render(frame, area),
         }
     }
 
@@ -124,7 +124,7 @@ impl App {
     }
 
     fn render_navbar(&self, frame: &mut Frame, top: Rect) {
-        let navbar = Block::new().borders(Borders::BOTTOM);
+        // let navbar = Block::new().borders(Borders::BOTTOM);
 
         let views: Vec<Span> = View::iter()
             .enumerate()
@@ -146,7 +146,7 @@ impl App {
             .into_iter()
             .intersperse(" ".into())
             .collect();
-        frame.render_widget(Paragraph::new(Line::from(views)).block(navbar), top);
+        frame.render_widget(Paragraph::new(Line::from(views)), top);
     }
 
     fn handle_events(&mut self) -> Result<()> {
