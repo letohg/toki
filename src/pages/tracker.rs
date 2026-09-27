@@ -10,8 +10,8 @@ use ratatui::{
 use std::str::FromStr;
 
 use crate::database::{self, EntityId};
-use crate::pages::delta_hms;
 use crate::pages::format_timestamp;
+use crate::pages::{delta_hms, tracker};
 
 pub struct Tracker {
     active_entry: Option<database::TimeEntry>,
@@ -57,27 +57,27 @@ impl Tracker {
         let [tracker_area, entries_area] =
             Layout::vertical([Constraint::Length(6), Constraint::Min(3)]).areas(area);
 
-        let tracker_block = Block::bordered().title("Tracker");
-        let recent_entries_block = Block::new().title("RECENT ENTRIES");
-        frame.render_widget(&tracker_block, tracker_area);
-        frame.render_widget(&recent_entries_block, entries_area);
-        self.render_tracker(frame, tracker_block.inner(tracker_area));
-        self.render_recent_entries(frame, recent_entries_block.inner(entries_area));
+        self.render_tracker(frame, tracker_area);
+        self.render_recent_entries(frame, entries_area);
     }
 
-    fn render_recent_entries(&self, frame: &mut Frame<'_>, entries_area: Rect) {
+    fn render_recent_entries(&self, frame: &mut Frame<'_>, area: Rect) {
+        let recent_entries_block = Block::new().title("RECENT ENTRIES");
+        frame.render_widget(&recent_entries_block, area);
+        let entries_area = recent_entries_block.inner(area);
+
         let headings = Row::new(
             ["Project", "Task", "Description", "Time", "Total"]
                 .into_iter()
                 .map(|t| Cell::from(t).bold()),
         );
-        let rows = self.recent_entries.iter().map(|e| {
+        let rows = self.recent_entries.iter().enumerate().map(|(i, e)| {
             let project = self.projects.iter().find(|p| p.id == e.project_id);
             let project_color = project.map_or(style::Color::Yellow, |p| {
                 style::Color::from_str(&p.color).unwrap_or_default()
             });
             Row::new(vec![
-                Cell::from(project.map_or("None".to_string(), |p| p.name.clone()))
+                Cell::from(project.map_or("None".to_string(), |p| format!("• {}", p.name)))
                     .style(style::Style::new().fg(project_color)),
                 "-".into(),
                 Cell::from(e.description.clone()),
@@ -89,6 +89,12 @@ impl Tracker {
                 )),
                 Cell::from(format!("{:>8}", delta_hms(&e.start_time, &e.end_time))),
             ])
+            // TODO: better coloring
+            .style(style::Style::default().bg(if i % 2 == 0 {
+                Color::DarkGray
+            } else {
+                Color::default()
+            }))
         });
         let column_widths = vec![
             Constraint::Length(15),
@@ -150,18 +156,45 @@ impl Tracker {
         }
     }
 
-    fn render_tracker(&self, frame: &mut Frame<'_>, tracker_area: Rect) {
+    fn render_tracker(&self, frame: &mut Frame<'_>, area: Rect) {
         let info = self.get_active_entry_info();
-        let columns = [Constraint::Length(14), Constraint::Min(1)];
-        let [label_area, values_area] = Layout::horizontal(columns).areas(tracker_area);
 
-        let status = match info {
-            Some(_) => Span::styled("TRACKING", style::Color::Green),
-            None => Span::styled("NOT TRACKING", style::Color::LightRed),
-        };
+        let tracker_block =
+            Block::bordered().title(if info.is_some() { "TRACKING" } else { "READY" });
+        let [a1, _] = Layout::horizontal([Constraint::Length(50), Constraint::Min(0)]).areas(area);
+        let tracker_area = tracker_block.inner(a1);
+
+        if info.is_none() {
+            frame.render_widget(&tracker_block, a1);
+            frame.render_widget(
+                Paragraph::new(vec![
+                    "No timer is runnig".into(),
+                    "".into(),
+                    "Press [s] to start tracking".into(),
+                ])
+                .wrap(Wrap { trim: true })
+                .centered(),
+                tracker_area,
+            );
+            return;
+        }
+
+        frame.render_widget(&tracker_block, a1);
+
+        let columns = [Constraint::Length(14), Constraint::Min(1)];
+        let [time_area, info_area] =
+            Layout::vertical([Constraint::Length(1), Constraint::Length(3)]).areas(tracker_area);
+        let [label_area, values_area] = Layout::horizontal(columns).areas(info_area);
+
+        frame.render_widget(
+            Paragraph::new(info.as_ref().map_or_default(|i| i.duration.clone()))
+                .style(style::Color::Green)
+                .centered(),
+            time_area,
+        );
+
         frame.render_widget(
             Paragraph::new(vec![
-                status.to_line(),
                 Line::from("Project:"),
                 Line::from("Task:"),
                 Line::from("Description:"),
@@ -170,16 +203,12 @@ impl Tracker {
             label_area,
         );
 
-        let duration = Line::styled(
-            info.as_ref().map_or_default(|i| i.duration.clone()),
-            style::Color::Green,
-        );
         let project_name = Line::from(info.as_ref().map_or_default(|i| i.project_name.clone()))
             .style(info.as_ref().map_or_default(|i| i.project_color));
         let task_name = Line::from(info.as_ref().map_or_default(|i| i.task.clone()));
         let description = Line::from(info.as_ref().map_or_default(|i| i.description.clone()));
         frame.render_widget(
-            Paragraph::new(vec![duration, project_name, task_name, description]),
+            Paragraph::new(vec![project_name, task_name, description]),
             values_area,
         );
     }
