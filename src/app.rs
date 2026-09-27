@@ -165,28 +165,7 @@ impl App {
     }
 
     fn handle_key_event(&mut self, key_event: KeyEvent) -> Result<()> {
-        let mut need_state_update: bool = match key_event.code {
-            KeyCode::Char('q') => {
-                if self.error_message.is_some() {
-                    self.error_message = None;
-                    true
-                } else {
-                    self.exit = true;
-                    false
-                }
-            }
-            KeyCode::Char('1') => {
-                self.active_page = Page::Tracker(pages::tracker::Tracker::new());
-                true
-            }
-            KeyCode::Char('2') => {
-                self.active_page = Page::Projects(pages::projects::Project::new());
-                true
-            }
-            // KeyCode::Char('s') => {}
-            _ => false,
-        };
-        need_state_update |= match &mut self.active_page {
+        let mut need_state_update = match &mut self.active_page {
             Page::Tracker(p) => match p.handle_key_event(key_event) {
                 Some(action) => {
                     match action {
@@ -200,6 +179,7 @@ impl App {
                         pages::tracker::TrackerAction::StopTracking(entry_id) => {
                             let _ = self.db.stop_entry(entry_id);
                         }
+                        pages::tracker::TrackerAction::ConsumedKey => (),
                     };
                     true
                 }
@@ -207,6 +187,31 @@ impl App {
             },
             Page::Projects(p) => p.handle_key_event(key_event),
         };
+
+        if !need_state_update {
+            need_state_update |= match key_event.code {
+                KeyCode::Char('q') => {
+                    if self.error_message.is_some() {
+                        self.error_message = None;
+                        true
+                    } else {
+                        self.exit = true;
+                        false
+                    }
+                }
+                KeyCode::Char('1') => {
+                    self.active_page = Page::Tracker(pages::tracker::Tracker::new());
+                    true
+                }
+                KeyCode::Char('2') => {
+                    self.active_page = Page::Projects(pages::projects::Project::new());
+                    true
+                }
+                // KeyCode::Char('s') => {}
+                _ => false,
+            };
+        }
+
         if need_state_update {
             self.update_state();
         }

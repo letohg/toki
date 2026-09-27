@@ -17,7 +17,7 @@ use std::str::FromStr;
 use crate::database::{self, EntityId};
 use crate::pages::format_timestamp;
 use crate::pages::tracker::StartTrackingState::ReviewBeforeStart;
-use crate::pages::tracker::TrackerAction::StartTracking;
+use crate::pages::tracker::TrackerAction::{ConsumedKey, StartTracking};
 use crate::pages::{delta_hms, tracker};
 
 #[derive(FromPrimitive)]
@@ -36,6 +36,7 @@ enum Mode {
 pub enum TrackerAction {
     StartTracking(EntityId, String, Option<EntityId>),
     StopTracking(EntityId),
+    ConsumedKey,
 }
 
 struct TrackingInfo {
@@ -49,6 +50,14 @@ struct TrackingInfo {
 struct NewEntryStartInfo {
     project: Option<database::Project>,
     description: String,
+}
+impl NewEntryStartInfo {
+    pub(crate) fn new() -> Self {
+        Self {
+            project: None,
+            description: String::new(),
+        }
+    }
 }
 
 pub struct Tracker {
@@ -72,10 +81,7 @@ impl Tracker {
             project_list_state: ListState::default().with_selected(Some(0)),
             start_new_tracker_list_state: ListState::default().with_selected(Some(0)),
             start_tracker_mode: StartTrackingState::ReviewBeforeStart,
-            new_entry_to_start: NewEntryStartInfo {
-                project: None,
-                description: "".to_owned(),
-            },
+            new_entry_to_start: NewEntryStartInfo::new(),
         }
     }
 
@@ -125,7 +131,7 @@ impl Tracker {
             ) {
                 Constraint::Percentage(70)
             } else {
-                Constraint::Length(7)
+                Constraint::Length(9)
             },
         );
         frame.render_widget(Clear, centered_area);
@@ -285,26 +291,19 @@ impl Tracker {
     fn handle_key_events_in_normal_mode(&mut self, key_event: KeyEvent) -> Option<TrackerAction> {
         match key_event.code {
             KeyCode::Char('s') if let Some(entry) = &self.active_entry => {
+                self.new_entry_to_start = NewEntryStartInfo::new();
                 Some(TrackerAction::StopTracking(entry.id))
             }
             KeyCode::Char('s') => {
                 self.mode = Mode::StartTracker;
-                let project_id = 1;
-                let description = "Description".to_owned();
-                let task_id: Option<EntityId> = None;
-                None
-                // Some(TrackerAction::StartTracking(
-                //     project_id,
-                //     description,
-                //     task_id,
-                // ))
+                Some(ConsumedKey)
             }
             KeyCode::Char('e') => {
                 // open edit entry mode
                 // Project:     [...]
                 // Task:        [...]
                 // Description: [...]
-                None
+                Some(ConsumedKey)
             }
             _ => None,
         }
@@ -330,14 +329,14 @@ impl Tracker {
                     KeyCode::Esc => self.start_tracker_mode = StartTrackingState::ReviewBeforeStart,
                     _ => (),
                 };
-                None
+                Some(ConsumedKey)
             }
             StartTrackingState::TaskSelection => {
                 if let KeyCode::Enter = key_event.code {
                     self.start_new_tracker_list_state.select_next();
                     self.start_tracker_mode = StartTrackingState::ReviewBeforeStart;
                 }
-                None
+                Some(ConsumedKey)
             }
             StartTrackingState::EnterDescription => {
                 match key_event.code {
@@ -352,16 +351,16 @@ impl Tracker {
                     }
                     _ => (),
                 };
-                None
+                Some(ConsumedKey)
             }
             StartTrackingState::ReviewBeforeStart => match key_event.code {
                 KeyCode::Up | KeyCode::Char('k') => {
                     self.start_new_tracker_list_state.select_previous();
-                    None
+                    Some(ConsumedKey)
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
                     self.start_new_tracker_list_state.select_next();
-                    None
+                    Some(ConsumedKey)
                 }
                 KeyCode::Char('s') if self.new_entry_to_start.project.is_some() => {
                     self.mode = Mode::Main;
@@ -376,11 +375,11 @@ impl Tracker {
                         self.start_new_tracker_list_state.selected().unwrap_or(0),
                     )
                     .unwrap();
-                    None
+                    Some(ConsumedKey)
                 }
-                KeyCode::Esc => {
+                KeyCode::Esc | KeyCode::Char('q') => {
                     self.mode = Mode::Main;
-                    None
+                    Some(ConsumedKey)
                 }
                 _ => None,
             },
