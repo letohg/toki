@@ -928,6 +928,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-derive"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4e98dc3b890f6c23a0f9d3d491a2823d0dea0fa656302a13dd225fa924112a8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.6",
+]
+
+[[package]]
 name = "num-traits"
 version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1666,7 +1677,7 @@ dependencies = [
  "log",
  "memmem",
  "nix",
- "num-derive",
+ "num-derive 0.4.2",
  "num-traits",
  "ordered-float",
  "pest",
@@ -1767,6 +1778,8 @@ dependencies = [
  "color-eyre",
  "crossterm",
  "itertools 0.15.0",
+ "num-derive 0.5.1",
+ "num-traits",
  "ratatui",
  "ratatui-core",
  "resolve-path",

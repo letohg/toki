@@ -108,7 +108,7 @@ impl App {
         //     .title("Timer");
         // frame.render_widget(&page, area);
 
-        match &self.active_page {
+        match &mut self.active_page {
             Page::Tracker(p) => p.render(frame, area),
             Page::Projects(p) => p.render(frame, area),
         }

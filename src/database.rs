@@ -25,6 +25,7 @@ fn string_to_ts(s: String) -> Timestamp {
         .with_timezone(&chrono::Utc)
 }
 
+#[derive(Clone)]
 pub struct Project {
     pub id: EntityId,
     pub name: String,
