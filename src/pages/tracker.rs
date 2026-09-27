@@ -3,7 +3,7 @@ use num_traits::FromPrimitive;
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::style::{self, Color, Style, Stylize};
-use ratatui::text::{Line, Span, ToLine};
+use ratatui::text::{Line, Span, Text, ToLine};
 use ratatui::widgets::{
     Block, BorderType, Borders, Clear, List, ListItem, ListState, Padding, Wrap,
 };
@@ -95,16 +95,11 @@ impl Tracker {
         match self.mode {
             Mode::Main => self.render_main_view(frame, area),
             Mode::StartTracker => {
+                self.render_main_view(frame, area);
                 let centered_area =
                     area.centered(Constraint::Percentage(50), Constraint::Percentage(70));
-                self.render_main_view(frame, area);
                 frame.render_widget(Clear, centered_area);
-                let block = Block::bordered()
-                    .border_type(BorderType::Rounded)
-                    .padding(Padding::symmetric(1, 1))
-                    .title("Start Tracker");
-                frame.render_widget(&block, centered_area);
-                self.render_start_tracker_form(frame, block.inner(centered_area));
+                self.render_start_tracker_form(frame, centered_area);
             }
         };
     }
@@ -125,7 +120,10 @@ impl Tracker {
     }
 
     fn render_start_tracker_form(&mut self, frame: &mut Frame<'_>, area: Rect) {
-        let block = Block::new().title(" Start Tracking: ");
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .padding(Padding::symmetric(1, 1))
+            .title("Start Tracker");
         frame.render_widget(&block, area);
 
         match self.start_tracker_mode {
@@ -133,7 +131,7 @@ impl Tracker {
                 let project_list =
                     List::new(self.projects.iter().map(|p| ListItem::new(p.name.as_str())))
                         .highlight_style(Style::default().bg(Color::DarkGray))
-                        .highlight_symbol(">");
+                        .highlight_symbol("> ");
                 frame.render_stateful_widget(
                     project_list,
                     block.inner(area),
@@ -167,16 +165,41 @@ impl Tracker {
                     label_area,
                 );
 
-                let project_name = ListItem::new(format!(
-                    "[ {} ]",
-                    self.new_entry_to_start
-                        .project
-                        .as_ref()
-                        .map_or("...".to_string(), |p| p.name.clone())
-                ));
-                let task_name = ListItem::new("[....]");
-                let description =
-                    ListItem::new(format!("[ {}│ ]", self.new_entry_to_start.description));
+                let project_name = ListItem::new(Line::from(vec![
+                    "[ ".into(),
+                    match &self.new_entry_to_start.project {
+                        Some(p) => p.name.clone().into(),
+                        None => Span::raw("select project...").italic(),
+                    },
+                    " ]".into(),
+                ]));
+                let task_name = ListItem::new(Line::from(vec![
+                    "[ ".into(),
+                    Span::raw("select task...").italic(),
+                    " ]".into(),
+                ]));
+                let desc = format!(
+                    "{}{}",
+                    self.new_entry_to_start.description,
+                    if matches!(
+                        self.start_tracker_mode,
+                        StartTrackingState::EnterDescription
+                    ) {
+                        "│"
+                    } else {
+                        ""
+                    }
+                );
+
+                let description = ListItem::new(Line::from(vec![
+                    "[ ".into(),
+                    if desc.is_empty() {
+                        Span::raw("add description...").italic()
+                    } else {
+                        Span::raw(desc)
+                    },
+                    Span::raw(" ]"),
+                ]));
                 frame.render_stateful_widget(
                     List::new(vec![project_name, task_name, description])
                         .highlight_style(Style::default().bg(Color::DarkGray))
@@ -311,13 +334,9 @@ impl Tracker {
                         let selected_project = self.projects[idx].clone();
                         self.new_entry_to_start.project = Some(selected_project);
                         // TODO: continue with task selection
-                        self.start_tracker_mode = StartTrackingState::EnterDescription;
-                        self.start_new_tracker_list_state.select_next();
-                        self.start_new_tracker_list_state.select_next();
+                        self.start_tracker_mode = StartTrackingState::ReviewBeforeStart;
                     }
-                    KeyCode::Esc => {
-                        self.mode = Mode::Main;
-                    }
+                    KeyCode::Esc => self.start_tracker_mode = StartTrackingState::ReviewBeforeStart,
                     _ => (),
                 };
                 None
@@ -325,7 +344,7 @@ impl Tracker {
             StartTrackingState::TaskSelection => {
                 if let KeyCode::Enter = key_event.code {
                     self.start_new_tracker_list_state.select_next();
-                    self.start_tracker_mode = StartTrackingState::EnterDescription;
+                    self.start_tracker_mode = StartTrackingState::ReviewBeforeStart;
                 }
                 None
             }
@@ -337,11 +356,8 @@ impl Tracker {
                     KeyCode::Backspace => {
                         self.new_entry_to_start.description.pop();
                     }
-                    KeyCode::Enter => {
+                    KeyCode::Enter | KeyCode::Esc => {
                         self.start_tracker_mode = StartTrackingState::ReviewBeforeStart
-                    }
-                    KeyCode::Esc => {
-                        self.start_tracker_mode = StartTrackingState::ProjectSelection;
                     }
                     _ => (),
                 };
