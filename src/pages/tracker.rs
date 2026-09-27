@@ -96,10 +96,7 @@ impl Tracker {
             Mode::Main => self.render_main_view(frame, area),
             Mode::StartTracker => {
                 self.render_main_view(frame, area);
-                let centered_area =
-                    area.centered(Constraint::Percentage(50), Constraint::Percentage(70));
-                frame.render_widget(Clear, centered_area);
-                self.render_start_tracker_form(frame, centered_area);
+                self.render_start_tracker_form(frame, area);
             }
         };
     }
@@ -120,11 +117,23 @@ impl Tracker {
     }
 
     fn render_start_tracker_form(&mut self, frame: &mut Frame<'_>, area: Rect) {
+        let centered_area = area.centered(
+            Constraint::Percentage(50),
+            if matches!(
+                self.start_tracker_mode,
+                StartTrackingState::ProjectSelection
+            ) {
+                Constraint::Percentage(70)
+            } else {
+                Constraint::Length(7)
+            },
+        );
+        frame.render_widget(Clear, centered_area);
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
             .padding(Padding::symmetric(1, 1))
             .title("Start Tracker");
-        frame.render_widget(&block, area);
+        frame.render_widget(&block, centered_area);
 
         match self.start_tracker_mode {
             StartTrackingState::ProjectSelection => {
@@ -134,7 +143,7 @@ impl Tracker {
                         .highlight_symbol("> ");
                 frame.render_stateful_widget(
                     project_list,
-                    block.inner(area),
+                    block.inner(centered_area),
                     &mut self.project_list_state,
                 );
             }
@@ -143,7 +152,7 @@ impl Tracker {
             | StartTrackingState::ReviewBeforeStart => {
                 let columns = [Constraint::Length(4), Constraint::Length(1)];
                 let [selection_area, keybinds_area] =
-                    Layout::vertical(columns).areas(block.inner(area));
+                    Layout::vertical(columns).areas(block.inner(centered_area));
                 if matches!(
                     self.start_tracker_mode,
                     StartTrackingState::ReviewBeforeStart
@@ -155,14 +164,14 @@ impl Tracker {
                 }
                 let columns = [Constraint::Length(14), Constraint::Min(1)];
                 let [label_area, values_area] = Layout::horizontal(columns).areas(selection_area);
-                frame.render_widget(
-                    Paragraph::new(vec![
+                frame.render_stateful_widget(
+                    List::new(vec![
                         Line::from("Project:"),
                         Line::from("Task:"),
                         Line::from("Description:"),
-                    ])
-                    .wrap(Wrap { trim: true }),
+                    ]),
                     label_area,
+                    &mut self.start_new_tracker_list_state
                 );
 
                 let project_name = create_input_list_item(
