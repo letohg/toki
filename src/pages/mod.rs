@@ -3,7 +3,7 @@ use ratatui::{Frame, layout::Rect};
 use crate::database::{Timestamp, Timezone};
 
 pub mod projects;
-pub mod timer;
+pub mod tracker;
 
 pub fn delta_hms(start: &Timestamp, end: &Option<Timestamp>) -> String {
     let delta: chrono::TimeDelta = end.unwrap_or(Timezone::now()) - start;

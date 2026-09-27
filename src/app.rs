@@ -17,34 +17,33 @@ use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
 use crate::database;
-use crate::views;
+use crate::pages;
 
 #[derive(Debug, PartialEq, EnumIter)]
 enum View {
-    Timer,
+    Tracker,
     Projects,
+}
+
+pub enum Page {
+    Tracker(pages::tracker::Tracker),
+    Projects(pages::projects::Project),
 }
 
 pub struct App {
     db: database::Database,
     exit: bool,
-    active_view: View,
+    active_page: Page,
     error_message: Option<String>,
-    // views
-    timer_view: views::timer::Timer,
-    project_view: views::projects::Project,
 }
 
 impl App {
     pub fn new() -> Self {
         let mut app = Self {
             db: database::Database::new().unwrap(),
-
             exit: false,
-            active_view: View::Timer,
+            active_page: Page::Tracker(pages::tracker::Tracker::new()),
             error_message: None,
-            timer_view: views::timer::Timer::new(),
-            project_view: views::projects::Project::new(),
         };
         app.update_state();
         app
@@ -63,11 +62,9 @@ impl App {
 
         let projects = self.db.get_projects().unwrap(); // TODO: handle failure case
 
-        match self.active_view {
-            View::Timer => self
-                .timer_view
-                .refresh(active_entry, recent_entries, projects),
-            View::Projects => self.project_view.refresh(projects),
+        match &mut self.active_page {
+            Page::Tracker(page) => page.refresh(active_entry, recent_entries, projects),
+            Page::Projects(page) => page.refresh(projects),
         }
     }
 
@@ -108,18 +105,19 @@ impl App {
             .title("Timer");
         frame.render_widget(&page, area);
 
-        match self.active_view {
-            View::Timer => {
-                self.timer_view.render(frame, page.inner(area));
-            }
-            View::Projects => self.project_view.render(frame, page.inner(area)),
+        match &self.active_page {
+            Page::Tracker(p) => p.render(frame, page.inner(area)),
+            Page::Projects(p) => p.render(frame, page.inner(area)),
         }
     }
 
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
-        let keybinds = match self.active_view {
-            View::Timer => "Navigate: ⇅  | Start/Stop: s | Edit: e | Quit: q | Switch View: 1/2",
-            View::Projects => "Navigate: ⇅  | Quit: q | Switch View: 1/2",
+        // TODO: move into page render logic
+        let keybinds = match &self.active_page {
+            Page::Tracker(_) => {
+                "Navigate: ⇅  | Start/Stop: s | Edit: e | Quit: q | Switch View: 1/2"
+            }
+            Page::Projects(_) => "Navigate: ⇅  | Quit: q | Switch View: 1/2",
         };
         let footer = Paragraph::new(keybinds);
         frame.render_widget(footer, area);
@@ -130,41 +128,25 @@ impl App {
 
         let views: Vec<Span> = View::iter()
             .enumerate()
-            .map(|(i, view)| {
-                if self.active_view == view {
-                    Span::styled(
-                        format!("[{}] {:?}", i + 1, view),
-                        Style::default().add_modifier(Modifier::BOLD),
-                    )
-                } else {
-                    Span::raw(format!("[{}] {:?}", i + 1, view))
+            .map(|(i, view)| -> Span {
+                let is_active = matches!(
+                    (&self.active_page, &view),
+                    (&Page::Tracker(_), &View::Tracker) | (&Page::Projects(_), &View::Projects)
+                );
+                let label = format!("[{}] {:?}", i + 1, view);
+                if !is_active {
+                    return label.into();
                 }
+                Span::styled(
+                    label,
+                    Style::default().add_modifier(Modifier::BOLD).light_yellow(),
+                )
             })
             .collect::<Vec<Span>>()
             .into_iter()
-            .intersperse(Span::raw(" "))
+            .intersperse(" ".into())
             .collect();
         frame.render_widget(Paragraph::new(Line::from(views)).block(navbar), top);
-    }
-
-    fn create_navbar(items: Vec<&str>) -> Line {
-        let styled_items: Vec<Span> = items
-            .iter()
-            .map(|item| {
-                let mut chars = item.chars();
-                let first_char = chars.next().unwrap_or(' ');
-                let rest: String = chars.collect();
-                vec![
-                    Span::styled(
-                        first_char.to_string(),
-                        Style::default().add_modifier(Modifier::UNDERLINED),
-                    ), // Underlined letter
-                    Span::raw(rest),
-                ]
-            })
-            .flatten()
-            .collect();
-        Line::from(styled_items)
     }
 
     fn handle_events(&mut self) -> Result<()> {
@@ -172,9 +154,8 @@ impl App {
         if !event::poll(timeout)? {
             return Ok(());
         }
-        match event::read()? {
-            Event::Key(key_event) => self.handle_key_event(key_event)?,
-            _ => (),
+        if let Event::Key(key_event) = event::read()? {
+            self.handle_key_event(key_event)?
         }
         Ok(())
     }
@@ -191,28 +172,28 @@ impl App {
                 }
             }
             KeyCode::Char('1') => {
-                self.active_view = View::Timer;
+                self.active_page = Page::Tracker(pages::tracker::Tracker::new());
                 true
             }
             KeyCode::Char('2') => {
-                self.active_view = View::Projects;
+                self.active_page = Page::Projects(pages::projects::Project::new());
                 true
             }
             // KeyCode::Char('s') => {}
             _ => false,
         };
-        need_state_update |= match self.active_view {
-            View::Timer => match self.timer_view.handle_key_event(key_event) {
+        need_state_update |= match &mut self.active_page {
+            Page::Tracker(p) => match p.handle_key_event(key_event) {
                 Some(action) => {
                     match action {
-                        views::timer::TimerAction::StartTracking(
+                        pages::tracker::TrackerAction::StartTracking(
                             project_id,
                             description,
                             task_id,
                         ) => {
                             let _ = self.db.start_entry(project_id, description, task_id);
                         }
-                        views::timer::TimerAction::StopTracking(entry_id) => {
+                        pages::tracker::TrackerAction::StopTracking(entry_id) => {
                             let _ = self.db.stop_entry(entry_id);
                         }
                     };
@@ -220,7 +201,7 @@ impl App {
                 }
                 None => false,
             },
-            View::Projects => self.project_view.handle_key_event(key_event),
+            Page::Projects(p) => p.handle_key_event(key_event),
         };
         if need_state_update {
             self.update_state();

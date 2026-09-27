@@ -10,16 +10,16 @@ use ratatui::{
 use std::str::FromStr;
 
 use crate::database::{self, EntityId};
-use crate::views::delta_hms;
-use crate::views::format_timestamp;
+use crate::pages::delta_hms;
+use crate::pages::format_timestamp;
 
-pub struct Timer {
+pub struct Tracker {
     active_entry: Option<database::TimeEntry>,
     recent_entries: Vec<database::TimeEntry>,
     projects: Vec<database::Project>,
 }
 
-pub enum TimerAction {
+pub enum TrackerAction {
     StartTracking(EntityId, String, Option<EntityId>),
     StopTracking(EntityId),
 }
@@ -32,7 +32,7 @@ struct TrackingInfo {
     description: String,
 }
 
-impl Timer {
+impl Tracker {
     pub fn new() -> Self {
         Self {
             active_entry: None,
@@ -108,16 +108,20 @@ impl Timer {
         frame.render_widget(table, entries_area);
     }
 
-    pub fn handle_key_event(&mut self, key_event: KeyEvent) -> Option<TimerAction> {
+    pub fn handle_key_event(&mut self, key_event: KeyEvent) -> Option<TrackerAction> {
         match key_event.code {
             KeyCode::Char('s') if let Some(entry) = &self.active_entry => {
-                Some(TimerAction::StopTracking(entry.id))
+                Some(TrackerAction::StopTracking(entry.id))
             }
             KeyCode::Char('s') => {
                 let project_id = 1;
                 let description = "Description".to_owned();
                 let task_id = None;
-                Some(TimerAction::StartTracking(project_id, description, task_id))
+                Some(TrackerAction::StartTracking(
+                    project_id,
+                    description,
+                    task_id,
+                ))
             }
             KeyCode::Char('e') => {
                 // open edit entry mode

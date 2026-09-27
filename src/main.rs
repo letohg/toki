@@ -1,6 +1,6 @@
 mod app;
 mod database;
-mod views;
+mod pages;
 
 use crate::app::App;
 
