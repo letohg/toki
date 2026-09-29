@@ -19,6 +19,7 @@ use strum_macros::EnumIter;
 
 use crate::database;
 use crate::pages;
+use crate::pages::PageAction;
 
 #[derive(Debug, PartialEq, EnumIter)]
 enum View {
@@ -86,7 +87,7 @@ impl App {
 
         self.render_navbar(frame, top);
         self.render_page(frame, middle);
-        self.render_footer(frame, bottom);
+        self.render_keybind_hints(frame, bottom);
         self.render_popup(frame, window.inner(area));
     }
 
@@ -114,12 +115,10 @@ impl App {
         }
     }
 
-    fn render_footer(&self, frame: &mut Frame, area: Rect) {
+    fn render_keybind_hints(&self, frame: &mut Frame, area: Rect) {
         // TODO: move into page render logic
         let keybinds = match &self.active_page {
-            Page::Tracker(_) => {
-                "Navigate: ⇅  | Start/Stop: s | Edit: e | Quit: q | Switch View: 1/2"
-            }
+            Page::Tracker(p) => p.get_keybind_hints(),
             Page::Projects(_) => "Navigate: ⇅  | Quit: q | Switch View: 1/2",
         };
         let [_, bottom] = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(area);
@@ -165,61 +164,73 @@ impl App {
     }
 
     fn handle_key_event(&mut self, key_event: KeyEvent) -> Result<()> {
-        let mut need_state_update = match &mut self.active_page {
-            Page::Tracker(p) => match p.handle_key_event(key_event) {
-                Some(action) => {
-                    match action {
-                        pages::tracker::TrackerAction::StartTracking(
-                            project_id,
-                            description,
-                            task_id,
-                        ) => {
-                            let _ = self.db.start_entry(project_id, description, task_id);
-                        }
-                        pages::tracker::TrackerAction::UpdateEntry(Some(entry)) => {
-                            self.db.update_entry(entry)?;
-                        }
-                        pages::tracker::TrackerAction::UpdateEntry(_) => {}
-                        pages::tracker::TrackerAction::StopTracking(entry_id) => {
-                            let _ = self.db.stop_entry(entry_id);
-                        }
-                        pages::tracker::TrackerAction::ConsumedKey => (),
-                    };
-                    true
-                }
-                None => false,
-            },
-            Page::Projects(p) => p.handle_key_event(key_event),
-        };
-
-        if !need_state_update {
-            need_state_update |= match key_event.code {
-                KeyCode::Char('q') => {
-                    if self.error_message.is_some() {
-                        self.error_message = None;
-                        true
-                    } else {
-                        self.exit = true;
-                        false
-                    }
-                }
-                KeyCode::Char('1') => {
-                    self.active_page = Page::Tracker(pages::tracker::Tracker::new());
-                    true
-                }
-                KeyCode::Char('2') => {
-                    self.active_page = Page::Projects(pages::projects::Project::new());
-                    true
-                }
-                // KeyCode::Char('s') => {}
-                _ => false,
-            };
-        }
-
-        if need_state_update {
+        if self.handle_current_page_keyevent(key_event)?
+            || self.handle_application_keyevent(key_event)
+        {
             self.update_state();
         }
         Ok(())
+    }
+
+    fn handle_application_keyevent(&mut self, key_event: KeyEvent) -> bool {
+        match key_event.code {
+            KeyCode::Char('q') => {
+                if self.error_message.is_some() {
+                    self.error_message = None;
+                    true
+                } else {
+                    self.exit = true;
+                    false
+                }
+            }
+            KeyCode::Char('1') => {
+                self.active_page = Page::Tracker(pages::tracker::Tracker::new());
+                true
+            }
+            KeyCode::Char('2') => {
+                self.active_page = Page::Projects(pages::projects::Project::new());
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_current_page_keyevent(
+        &mut self,
+        key_event: KeyEvent,
+    ) -> Result<bool, color_eyre::eyre::Error> {
+        Ok(match &mut self.active_page {
+            Page::Tracker(p) => {
+                if let Some(action) = p.handle_key_event(key_event) {
+                    self.handle_page_action(action)?;
+                }
+                false
+            }
+            Page::Projects(p) => p.handle_key_event(key_event),
+        })
+    }
+
+    fn handle_page_action(&mut self, action: PageAction) -> Result<bool, color_eyre::eyre::Error> {
+        if let PageAction::Tracker(a) = action {
+            match a {
+                pages::tracker::TrackerAction::StartTracking {
+                    project_id,
+                    description,
+                    task_id,
+                } => {
+                    let _ = self.db.start_entry(project_id, description, task_id);
+                }
+                pages::tracker::TrackerAction::UpdateEntry(Some(entry)) => {
+                    self.db.update_entry(entry)?;
+                }
+                pages::tracker::TrackerAction::UpdateEntry(_) => {}
+                pages::tracker::TrackerAction::StopTracking { entry_id } => {
+                    let _ = self.db.stop_entry(entry_id);
+                }
+                pages::tracker::TrackerAction::ConsumedKey => (),
+            };
+        }
+        Ok(false)
     }
 
     fn set_error(&mut self, msg: String) {

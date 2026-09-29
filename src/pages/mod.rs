@@ -1,9 +1,17 @@
 use ratatui::{Frame, layout::Rect};
 
-use crate::database::{Timestamp, Timezone};
+use crate::{
+    database::{Timestamp, Timezone},
+    pages::tracker::TrackerAction,
+};
 
 pub mod projects;
 pub mod tracker;
+
+pub enum PageAction {
+    Tracker(TrackerAction),
+    Projects,
+}
 
 pub fn delta_hms(start: &Timestamp, end: &Option<Timestamp>) -> String {
     let delta: chrono::TimeDelta = end.unwrap_or(Timezone::now()) - start;

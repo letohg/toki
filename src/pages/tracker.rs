@@ -16,9 +16,9 @@ use ratatui::{
 use std::str::FromStr;
 
 use crate::database::{self, EntityId, TimeEntry};
-use crate::pages::format_timestamp;
 use crate::pages::tracker::StartTrackingState::ReviewBeforeStart;
 use crate::pages::tracker::TrackerAction::{ConsumedKey, StartTracking};
+use crate::pages::{PageAction, format_timestamp};
 use crate::pages::{delta_hms, tracker};
 
 #[derive(FromPrimitive)]
@@ -36,9 +36,15 @@ enum Mode {
 }
 
 pub enum TrackerAction {
-    StartTracking(EntityId, String, Option<EntityId>),
+    StartTracking {
+        project_id: EntityId,
+        description: String,
+        task_id: Option<EntityId>,
+    },
     UpdateEntry(Option<database::TimeEntry>),
-    StopTracking(EntityId),
+    StopTracking {
+        entry_id: EntityId,
+    },
     ConsumedKey,
 }
 
@@ -283,19 +289,20 @@ impl Tracker {
         }
     }
 
-    pub fn handle_key_event(&mut self, key_event: KeyEvent) -> Option<TrackerAction> {
-        match self.mode {
+    pub fn handle_key_event(&mut self, key_event: KeyEvent) -> Option<PageAction> {
+        let action = match self.mode {
             Mode::Main => self.handle_key_events_in_normal_mode(key_event),
             Mode::StartNewEntry => self.handle_key_events_start_tracking(key_event),
             Mode::EditActiveEntry => self.handle_key_events_start_tracking(key_event),
-        }
+        };
+        action.map_or_default(|a| Some(PageAction::Tracker(a)))
     }
 
     fn handle_key_events_in_normal_mode(&mut self, key_event: KeyEvent) -> Option<TrackerAction> {
         match key_event.code {
             KeyCode::Char('s') if let Some(entry) = &self.active_entry => {
                 self.new_entry_to_start = NewEntryStartInfo::new();
-                Some(TrackerAction::StopTracking(entry.id))
+                Some(TrackerAction::StopTracking { entry_id: entry.id })
             }
             KeyCode::Char('s') => {
                 self.mode = Mode::StartNewEntry;
@@ -322,18 +329,7 @@ impl Tracker {
                     KeyCode::Enter => {
                         let idx = self.project_list_state.selected().unwrap();
                         let selected_project = self.projects[idx].clone();
-                        let p_old = self
-                            .new_entry_to_start
-                            .project
-                            .as_ref()
-                            .map_or("none".into(), |p| p.name.clone());
                         self.new_entry_to_start.project = Some(selected_project);
-                        let p_new = self
-                            .new_entry_to_start
-                            .project
-                            .as_ref()
-                            .map_or("none".into(), |p| p.name.clone());
-                        dbg!(p_old, p_new);
                         // TODO: continue with task selection
                         self.start_tracker_mode = StartTrackingState::ReviewBeforeStart;
                     }
@@ -376,11 +372,11 @@ impl Tracker {
                 KeyCode::Char('s') if self.new_entry_to_start.project.is_some() => {
                     if matches!(self.mode, Mode::StartNewEntry) {
                         self.mode = Mode::Main;
-                        return Some(StartTracking(
-                            self.new_entry_to_start.project.as_ref().unwrap().id,
-                            self.new_entry_to_start.description.clone(),
-                            None,
-                        ));
+                        return Some(StartTracking {
+                            project_id: self.new_entry_to_start.project.as_ref().unwrap().id,
+                            description: self.new_entry_to_start.description.clone(),
+                            task_id: None,
+                        });
                     }
                     Some(TrackerAction::ConsumedKey)
                 }
@@ -460,6 +456,33 @@ impl Tracker {
             .padding(Padding::horizontal(1));
         frame.render_widget(&block, area);
         let stats_area = block.inner(area);
+    }
+
+    pub fn get_keybind_hints(&self) -> &str {
+        match self.mode {
+            Mode::Main => {
+                if self.active_entry.is_some() {
+                    "Navigate: ⇅  | Stop: s | Edit: e | Quit: q | Switch View: 1/2"
+                } else {
+                    "Navigate: ⇅  | Start: s | Quit: q | Switch View: 1/2"
+                }
+            }
+            Mode::StartNewEntry => match self.start_tracker_mode {
+                StartTrackingState::ProjectSelection => {
+                    "Navigate: ⇅  | Start: s | Quit: q | Switch View: 1/2"
+                }
+                StartTrackingState::TaskSelection => {
+                    "Navigate: ⇅  | Start: s | Quit: q | Switch View: 1/2"
+                }
+                StartTrackingState::EnterDescription => "Submit: <enter>",
+                ReviewBeforeStart => {
+                    "Navigate: ⇅  | Start: s | Edit: e | Quit: q | Switch View: 1/2"
+                }
+            },
+            Mode::EditActiveEntry => {
+                "Navigate: ⇅  | Start/Stop: s | Edit: e | Quit: q | Switch View: 1/2"
+            }
+        }
     }
 }
 
