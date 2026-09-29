@@ -24,7 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match App::new().run(&mut terminal) {
         Ok(_) => (),
-        Err(_) => todo!(),
+        Err(_) => (),
     };
 
     // restore terminal

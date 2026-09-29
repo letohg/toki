@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 
@@ -14,7 +15,7 @@ use ratatui::{
 };
 use std::str::FromStr;
 
-use crate::database::{self, EntityId};
+use crate::database::{self, EntityId, TimeEntry};
 use crate::pages::format_timestamp;
 use crate::pages::tracker::StartTrackingState::ReviewBeforeStart;
 use crate::pages::tracker::TrackerAction::{ConsumedKey, StartTracking};
@@ -97,19 +98,33 @@ impl Tracker {
         self.active_entry = active_entry;
         self.recent_entries = recent_entries;
         self.projects = projects;
+
+        if let Some(e) = &self.active_entry
+            && self.new_entry_to_start.project.is_none()
+        {
+            self.new_entry_to_start.project = self.projects.iter().find_map(|p| {
+                if p.id == e.project_id {
+                    return Some(p.clone());
+                }
+                None
+            });
+            self.new_entry_to_start.description = e.description.clone();
+        }
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
-        match self.mode {
-            Mode::Main => self.render_main_view(frame, area),
-            Mode::EditActiveEntry | Mode::StartNewEntry => {
-                self.render_main_view(frame, area);
-                self.render_start_tracker_form(frame, area);
-            }
-        };
+        self.render_main_view(frame, area);
+        if matches!(self.mode, Mode::StartNewEntry | Mode::EditActiveEntry)
+            && matches!(
+                self.start_tracker_mode,
+                StartTrackingState::ProjectSelection
+            )
+        {
+            self.render_project_selection_list(frame, area);
+        }
     }
 
-    fn render_main_view(&self, frame: &mut Frame<'_>, area: Rect) {
+    fn render_main_view(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let [tracker_stats_area, entries_area] =
             Layout::vertical([Constraint::Length(6), Constraint::Min(3)]).areas(area);
 
@@ -124,7 +139,7 @@ impl Tracker {
         self.render_recent_entries(frame, entries_area);
     }
 
-    fn render_start_tracker_form(&mut self, frame: &mut Frame<'_>, area: Rect) {
+    fn render_project_selection_list(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let centered_area = area.centered(
             Constraint::Percentage(50),
             if matches!(
@@ -143,71 +158,56 @@ impl Tracker {
             .title("Start Tracker");
         frame.render_widget(&block, centered_area);
 
-        match self.start_tracker_mode {
-            StartTrackingState::ProjectSelection => {
-                let project_list =
-                    List::new(self.projects.iter().map(|p| ListItem::new(p.name.as_str())))
-                        .highlight_style(Style::default().bg(Color::DarkGray))
-                        .highlight_symbol("> ");
-                frame.render_stateful_widget(
-                    project_list,
-                    block.inner(centered_area),
-                    &mut self.project_list_state,
-                );
-            }
-            StartTrackingState::TaskSelection // TODO:
-            | StartTrackingState::EnterDescription
-            | StartTrackingState::ReviewBeforeStart => {
-                let columns = [Constraint::Length(4), Constraint::Length(1)];
-                let [selection_area, keybinds_area] =
-                    Layout::vertical(columns).areas(block.inner(centered_area));
-                if matches!(
-                    self.start_tracker_mode,
-                    StartTrackingState::ReviewBeforeStart
-                ) {
-                    frame.render_widget(
-                        Paragraph::new("edit: <enter>  start: <s>").centered(),
-                        keybinds_area,
-                    );
-                }
-                let columns = [Constraint::Length(14), Constraint::Min(1)];
-                let [label_area, values_area] = Layout::horizontal(columns).areas(selection_area);
-                frame.render_stateful_widget(
-                    List::new(vec![
-                        Line::from("Project:"),
-                        Line::from("Task:"),
-                        Line::from("Description:"),
-                    ]),
-                    label_area,
-                    &mut self.start_new_tracker_list_state
-                );
+        let project_list = List::new(self.projects.iter().map(|p| {
+            ListItem::new(p.name.as_str())
+                .style(Style::new().fg(style::Color::from_str(&p.color).unwrap()))
+        }))
+        .highlight_style(Style::default().bg(Color::DarkGray))
+        .highlight_symbol("> ");
+        frame.render_stateful_widget(
+            project_list,
+            block.inner(centered_area),
+            &mut self.project_list_state,
+        );
+    }
 
-                let project_name = create_input_list_item(
-                    "select project...",
-                    self.new_entry_to_start
-                        .project
-                        .as_ref()
-                        .map(|p| p.name.clone()),
-                );
-                let task_name = create_input_list_item("select task...", None);
-                let desc = format_as_active_text_input(
-                    &self.new_entry_to_start.description,
-                    matches!(
-                        self.start_tracker_mode,
-                        StartTrackingState::EnterDescription
-                    ),
-                );
+    fn render_start_edit_entry_mode(
+        &mut self,
+        frame: &mut Frame<'_>,
+        labels_area: Rect,
+        values_area: Rect,
+    ) {
+        let labels = List::new(vec![
+            Line::from("Project:"),
+            Line::from("Task:"),
+            Line::from("Description:"),
+        ]);
+        frame.render_stateful_widget(labels, labels_area, &mut self.start_new_tracker_list_state);
 
-                let description = create_input_list_item("add description...", desc.into());
-                frame.render_stateful_widget(
-                    List::new(vec![project_name, task_name, description])
-                        .highlight_style(Style::default().bg(Color::DarkGray))
-                        .highlight_symbol(">"),
-                    values_area,
-                    &mut self.start_new_tracker_list_state,
-                );
-            }
-        };
+        let project_name = create_input_list_item(
+            "select project...",
+            self.new_entry_to_start
+                .project
+                .as_ref()
+                .map(|p| p.name.clone()),
+        );
+        let task_name = create_input_list_item("select task...", None);
+        let desc = format_as_active_text_input(
+            &self.new_entry_to_start.description,
+            matches!(
+                self.start_tracker_mode,
+                StartTrackingState::EnterDescription
+            ),
+        );
+
+        let description = create_input_list_item("add description...", desc.into());
+        frame.render_stateful_widget(
+            List::new(vec![project_name, task_name, description])
+                .highlight_style(Style::default().bg(Color::DarkGray))
+                .highlight_symbol(">"),
+            values_area,
+            &mut self.start_new_tracker_list_state,
+        );
     }
 
     fn render_recent_entries(&self, frame: &mut Frame<'_>, area: Rect) {
@@ -322,7 +322,18 @@ impl Tracker {
                     KeyCode::Enter => {
                         let idx = self.project_list_state.selected().unwrap();
                         let selected_project = self.projects[idx].clone();
+                        let p_old = self
+                            .new_entry_to_start
+                            .project
+                            .as_ref()
+                            .map_or("none".into(), |p| p.name.clone());
                         self.new_entry_to_start.project = Some(selected_project);
+                        let p_new = self
+                            .new_entry_to_start
+                            .project
+                            .as_ref()
+                            .map_or("none".into(), |p| p.name.clone());
+                        dbg!(p_old, p_new);
                         // TODO: continue with task selection
                         self.start_tracker_mode = StartTrackingState::ReviewBeforeStart;
                     }
@@ -375,6 +386,18 @@ impl Tracker {
                 }
                 KeyCode::Char('d') if matches!(self.mode, Mode::EditActiveEntry) => {
                     self.mode = Mode::Main;
+                    self.active_entry = match &self.active_entry {
+                        Some(e) => Some(TimeEntry {
+                            id: e.id,
+                            project_id: self.new_entry_to_start.project.clone().unwrap().id,
+                            task_id: e.task_id,
+                            description: self.new_entry_to_start.description.clone(),
+                            start_time: e.start_time,
+                            end_time: e.end_time,
+                            created_at: e.created_at,
+                        }),
+                        None => None,
+                    };
                     Some(TrackerAction::UpdateEntry(self.active_entry.clone()))
                 }
                 KeyCode::Enter => {
@@ -393,12 +416,15 @@ impl Tracker {
         }
     }
 
-    fn render_tracker(&self, frame: &mut Frame<'_>, area: Rect) {
+    fn render_tracker(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let info = self.get_active_entry_info();
-
         let block = Block::bordered()
             .title(if info.is_some() {
                 " TRACKING "
+            } else if matches!(self.mode, Mode::StartNewEntry) {
+                " STARTING TRACKER "
+            } else if matches!(self.mode, Mode::EditActiveEntry) {
+                " EDITING TRACKER "
             } else {
                 " READY "
             })
@@ -406,53 +432,25 @@ impl Tracker {
             .padding(Padding::horizontal(1));
         let tracker_area = block.inner(area);
 
-        if info.is_none() {
-            frame.render_widget(&block, area);
-            frame.render_widget(
-                Paragraph::new(vec![
-                    "No timer is runnig".into(),
-                    "".into(),
-                    "Press [s] to start tracking".into(),
-                ])
-                .wrap(Wrap { trim: true })
-                .centered(),
-                tracker_area,
-            );
-            return;
-        }
-
-        frame.render_widget(&block, area);
-
         let columns = [Constraint::Length(14), Constraint::Min(1)];
         let [time_area, info_area] =
             Layout::vertical([Constraint::Length(1), Constraint::Length(3)]).areas(tracker_area);
-        let [label_area, values_area] = Layout::horizontal(columns).areas(info_area);
+        let [labels_area, values_area] = Layout::horizontal(columns).areas(info_area);
 
-        frame.render_widget(
-            Paragraph::new(info.as_ref().map_or_default(|i| i.duration.clone()))
-                .style(style::Color::Green)
-                .centered(),
-            time_area,
-        );
+        frame.render_widget(&block, area);
 
-        frame.render_widget(
-            Paragraph::new(vec![
-                Line::from("Project:"),
-                Line::from("Task:"),
-                Line::from("Description:"),
-            ])
-            .wrap(Wrap { trim: true }),
-            label_area,
-        );
-
-        let project_name = Line::from(info.as_ref().map_or_default(|i| i.project_name.clone()))
-            .style(info.as_ref().map_or_default(|i| i.project_color));
-        let task_name = Line::from(info.as_ref().map_or_default(|i| i.task.clone()));
-        let description = Line::from(info.as_ref().map_or_default(|i| i.description.clone()));
-        frame.render_widget(
-            Paragraph::new(vec![project_name, task_name, description]),
-            values_area,
-        );
+        match self.mode {
+            Mode::Main => {
+                if info.is_none() {
+                    render_no_active_tracker(frame, tracker_area);
+                    return;
+                }
+                render_active_tracker_info(frame, info, time_area, labels_area, values_area);
+            }
+            Mode::EditActiveEntry | Mode::StartNewEntry => {
+                self.render_start_edit_entry_mode(frame, labels_area, values_area);
+            }
+        };
     }
 
     fn render_todays_stats(&self, frame: &mut Frame<'_>, area: Rect) {
@@ -463,6 +461,50 @@ impl Tracker {
         frame.render_widget(&block, area);
         let stats_area = block.inner(area);
     }
+}
+
+fn render_active_tracker_info(
+    frame: &mut Frame<'_>,
+    info: Option<TrackingInfo>,
+    time_area: Rect,
+    labels_area: Rect,
+    values_area: Rect,
+) {
+    frame.render_widget(
+        Paragraph::new(info.as_ref().map_or_default(|i| i.duration.clone()))
+            .style(style::Color::Green)
+            .centered(),
+        time_area,
+    );
+
+    let labels = Paragraph::new(vec![
+        Line::from("Project:"),
+        Line::from("Task:"),
+        Line::from("Description:"),
+    ]);
+    frame.render_widget(labels, labels_area);
+
+    let project_name = Line::from(info.as_ref().map_or_default(|i| i.project_name.clone()))
+        .style(info.as_ref().map_or_default(|i| i.project_color));
+    let task_name = Line::from(info.as_ref().map_or_default(|i| i.task.clone()));
+    let description = Line::from(info.as_ref().map_or_default(|i| i.description.clone()));
+    frame.render_widget(
+        Paragraph::new(vec![project_name, task_name, description]),
+        values_area,
+    );
+}
+
+fn render_no_active_tracker(frame: &mut Frame<'_>, tracker_area: Rect) {
+    frame.render_widget(
+        Paragraph::new(vec![
+            "No timer is runnig".into(),
+            "".into(),
+            "Press [s] to start tracking".into(),
+        ])
+        .wrap(Wrap { trim: true })
+        .centered(),
+        tracker_area,
+    );
 }
 
 fn format_as_active_text_input(text: &String, editing_active: bool) -> String {

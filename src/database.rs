@@ -138,6 +138,23 @@ impl Database {
         .unwrap_or(None)
     }
 
+    pub fn update_entry(&self, updated_entry: TimeEntry) -> rusqlite::Result<()> {
+        let con = self.get_connection();
+        con.execute(
+            "UPDATE time_entries SET project_id=?, task_id=?, description=?, start_time=?, end_time=? 
+             WHERE id=?",
+            (
+                &updated_entry.project_id,
+                &updated_entry.task_id,
+                &updated_entry.description,
+                ts_to_str(updated_entry.start_time),
+                updated_entry.end_time.map(ts_to_str),
+                &updated_entry.id
+            ),
+        )?;
+        Ok(())
+    }
+
     pub fn get_recent_entries(&self, limit: u32) -> Vec<TimeEntry> {
         let con = self.get_connection();
 
@@ -155,7 +172,7 @@ impl Database {
                 Ok(TimeEntry {
                     id: row.get(0)?,
                     project_id: row.get(1)?,
-                    task_id: row.get(2)?,
+                    task_id: row.get(2).unwrap_or(None),
                     description: row.get(3)?,
                     start_time: string_to_ts(row.get(4)?),
                     end_time: row.get(5).map_or(None, |ts| Some(string_to_ts(ts))),

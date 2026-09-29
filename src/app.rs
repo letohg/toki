@@ -177,7 +177,7 @@ impl App {
                             let _ = self.db.start_entry(project_id, description, task_id);
                         }
                         pages::tracker::TrackerAction::UpdateEntry(Some(entry)) => {
-                            // self.db.update_entry(entry);
+                            self.db.update_entry(entry)?;
                         }
                         pages::tracker::TrackerAction::UpdateEntry(_) => {}
                         pages::tracker::TrackerAction::StopTracking(entry_id) => {
