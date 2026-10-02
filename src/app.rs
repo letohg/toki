@@ -164,11 +164,14 @@ impl App {
     }
 
     fn handle_key_event(&mut self, key_event: KeyEvent) -> Result<()> {
-        if self.handle_current_page_keyevent(key_event)?
-            || self.handle_application_keyevent(key_event)
-        {
+        if self.handle_current_page_keyevent(key_event)? {
+            return Ok(());
+        }
+
+        if self.handle_application_keyevent(key_event) {
             self.update_state();
         }
+
         Ok(())
     }
 
@@ -195,24 +198,26 @@ impl App {
         }
     }
 
+    /// True means key was consumed, false means it should be passed to the application level
+    /// handler
     fn handle_current_page_keyevent(
         &mut self,
         key_event: KeyEvent,
     ) -> Result<bool, color_eyre::eyre::Error> {
-        Ok(match &mut self.active_page {
+        match &mut self.active_page {
             Page::Tracker(p) => {
                 if let Some(action) = p.handle_key_event(key_event) {
-                    self.handle_page_action(action)?;
+                    return self.handle_page_action(action);
                 }
-                false
+                Ok(false)
             }
-            Page::Projects(p) => p.handle_key_event(key_event),
-        })
+            Page::Projects(p) => Ok(p.handle_key_event(key_event)),
+        }
     }
 
     fn handle_page_action(&mut self, action: PageAction) -> Result<bool, color_eyre::eyre::Error> {
-        if let PageAction::Tracker(a) = action {
-            match a {
+        Ok(match action {
+            PageAction::Tracker(a) => match a {
                 pages::tracker::TrackerAction::StartTracking {
                     project_id,
                     description,
@@ -220,21 +225,23 @@ impl App {
                 } => {
                     let _ = self.db.start_entry(project_id, description, task_id);
                     self.update_state();
+                    true
                 }
                 pages::tracker::TrackerAction::UpdateEntry(entry) => {
-                    dbg!("Update");
                     self.db.update_entry(entry)?;
                     self.update_state();
+                    true
                 }
                 pages::tracker::TrackerAction::StopTracking { entry_id } => {
-                    dbg!("STOP");
                     let _ = self.db.stop_entry(entry_id);
                     self.update_state();
+                    true
                 }
-                pages::tracker::TrackerAction::ConsumedKey => (),
-            };
-        }
-        Ok(false)
+                // TODO: ensure that this causes app to not check for keys
+                pages::tracker::TrackerAction::ConsumedKey => true,
+            },
+            _ => false,
+        })
     }
 
     fn set_error(&mut self, msg: String) {
