@@ -219,13 +219,17 @@ impl App {
                     task_id,
                 } => {
                     let _ = self.db.start_entry(project_id, description, task_id);
+                    self.update_state();
                 }
-                pages::tracker::TrackerAction::UpdateEntry(Some(entry)) => {
+                pages::tracker::TrackerAction::UpdateEntry(entry) => {
+                    dbg!("Update");
                     self.db.update_entry(entry)?;
+                    self.update_state();
                 }
-                pages::tracker::TrackerAction::UpdateEntry(_) => {}
                 pages::tracker::TrackerAction::StopTracking { entry_id } => {
+                    dbg!("STOP");
                     let _ = self.db.stop_entry(entry_id);
+                    self.update_state();
                 }
                 pages::tracker::TrackerAction::ConsumedKey => (),
             };

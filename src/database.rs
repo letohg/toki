@@ -34,7 +34,7 @@ pub struct Project {
     pub created_at: Timestamp,
 }
 
-#[derive(Clone)]
+#[derive(Default, Clone)]
 pub struct TimeEntry {
     pub id: EntityId,
     pub project_id: EntityId,
@@ -126,7 +126,7 @@ impl Database {
                 Ok(TimeEntry {
                     id: row.get(0)?,
                     project_id: row.get(1)?,
-                    task_id: row.get(2)?,
+                    task_id: row.get(2).unwrap_or(None),
                     description: row.get(3)?,
                     start_time: string_to_ts(row.get(4)?),
                     end_time: row.get(5).map_or(None, |ts| Some(string_to_ts(ts))),

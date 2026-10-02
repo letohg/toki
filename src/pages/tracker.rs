@@ -15,13 +15,13 @@ use ratatui::{
 };
 use std::str::FromStr;
 
-use crate::database::{self, EntityId, TimeEntry};
+use crate::database::{self, EntityId, Project, TimeEntry};
 use crate::pages::tracker::StartTrackingState::ReviewBeforeStart;
 use crate::pages::tracker::TrackerAction::{ConsumedKey, StartTracking};
 use crate::pages::{PageAction, format_timestamp};
 use crate::pages::{delta_hms, tracker};
 
-#[derive(FromPrimitive)]
+#[derive(Clone, FromPrimitive)]
 enum StartTrackingState {
     ProjectSelection,
     TaskSelection,
@@ -29,10 +29,48 @@ enum StartTrackingState {
     ReviewBeforeStart,
 }
 
-enum Mode {
-    Main,
-    StartNewEntry,
-    EditActiveEntry,
+#[derive(Clone)]
+struct StartNewEntryState {
+    new_entry: NewEntryStartInfo,
+    mode: StartTrackingState,
+    menu_list_state: ListState,
+    project_list_state: ListState,
+}
+impl StartNewEntryState {
+    fn default() -> Self {
+        Self {
+            new_entry: NewEntryStartInfo::default(),
+            mode: StartTrackingState::ReviewBeforeStart,
+            menu_list_state: ListState::default().with_selected(Some(0)),
+            project_list_state: ListState::default().with_selected(Some(0)),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct EditActiveEntryState {
+    active_entry: database::TimeEntry,
+    mode: StartTrackingState,
+    menu_list_state: ListState,
+    project_list_state: ListState,
+}
+impl EditActiveEntryState {
+    fn default() -> Self {
+        Self {
+            active_entry: TimeEntry::default(),
+            mode: StartTrackingState::ReviewBeforeStart,
+            menu_list_state: ListState::default().with_selected(Some(0)),
+            project_list_state: ListState::default().with_selected(Some(0)),
+        }
+    }
+}
+
+#[derive(Clone)]
+enum TimerMode {
+    NoRunningEntry,
+    ShowActiveEntry(database::TimeEntry),
+    StartNewEntry(StartNewEntryState),
+    EditActiveEntry(EditActiveEntryState),
 }
 
 pub enum TrackerAction {
@@ -41,7 +79,7 @@ pub enum TrackerAction {
         description: String,
         task_id: Option<EntityId>,
     },
-    UpdateEntry(Option<database::TimeEntry>),
+    UpdateEntry(database::TimeEntry),
     StopTracking {
         entry_id: EntityId,
     },
@@ -56,41 +94,26 @@ struct TrackingInfo {
     description: String,
 }
 
+#[derive(Default, Clone)]
 struct NewEntryStartInfo {
     project: Option<database::Project>,
     description: String,
 }
-impl NewEntryStartInfo {
-    pub(crate) fn new() -> Self {
-        Self {
-            project: None,
-            description: String::new(),
-        }
-    }
-}
 
 pub struct Tracker {
-    active_entry: Option<database::TimeEntry>,
     recent_entries: Vec<database::TimeEntry>,
     projects: Vec<database::Project>,
-    mode: Mode,
-    project_list_state: ListState,
-    start_new_tracker_list_state: ListState,
+    timer_mode: TimerMode,
     start_tracker_mode: StartTrackingState,
-    new_entry_to_start: NewEntryStartInfo,
 }
 
 impl Tracker {
     pub fn new() -> Self {
         Self {
-            active_entry: None,
             recent_entries: Vec::new(),
             projects: Vec::new(),
-            mode: Mode::Main,
-            project_list_state: ListState::default().with_selected(Some(0)),
-            start_new_tracker_list_state: ListState::default().with_selected(Some(0)),
+            timer_mode: TimerMode::NoRunningEntry,
             start_tracker_mode: StartTrackingState::ReviewBeforeStart,
-            new_entry_to_start: NewEntryStartInfo::new(),
         }
     }
 
@@ -101,33 +124,39 @@ impl Tracker {
 
         projects: Vec<database::Project>,
     ) {
-        self.active_entry = active_entry;
+        if let Some(e) = active_entry {
+            self.timer_mode = TimerMode::ShowActiveEntry(e);
+        }
+
         self.recent_entries = recent_entries;
         self.projects = projects;
-
-        if let Some(e) = &self.active_entry
-            && self.new_entry_to_start.project.is_none()
-        {
-            self.new_entry_to_start.project = self.projects.iter().find_map(|p| {
-                if p.id == e.project_id {
-                    return Some(p.clone());
-                }
-                None
-            });
-            self.new_entry_to_start.description = e.description.clone();
-        }
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
         self.render_main_view(frame, area);
-        if matches!(self.mode, Mode::StartNewEntry | Mode::EditActiveEntry)
-            && matches!(
-                self.start_tracker_mode,
-                StartTrackingState::ProjectSelection
-            )
-        {
-            self.render_project_selection_list(frame, area);
-        }
+        match &mut self.timer_mode {
+            TimerMode::StartNewEntry(state)
+                if matches!(state.mode, StartTrackingState::ProjectSelection) =>
+            {
+                render_project_selection_list(
+                    frame,
+                    area,
+                    &self.projects,
+                    &mut state.project_list_state,
+                )
+            }
+            TimerMode::EditActiveEntry(state)
+                if matches!(state.mode, StartTrackingState::ProjectSelection) =>
+            {
+                render_project_selection_list(
+                    frame,
+                    area,
+                    &self.projects,
+                    &mut state.project_list_state,
+                )
+            }
+            _ => (),
+        };
     }
 
     fn render_main_view(&mut self, frame: &mut Frame<'_>, area: Rect) {
@@ -143,77 +172,6 @@ impl Tracker {
         self.render_tracker(frame, tracker_area);
         self.render_todays_stats(frame, today_stats_area);
         self.render_recent_entries(frame, entries_area);
-    }
-
-    fn render_project_selection_list(&mut self, frame: &mut Frame<'_>, area: Rect) {
-        let centered_area = area.centered(
-            Constraint::Percentage(50),
-            if matches!(
-                self.start_tracker_mode,
-                StartTrackingState::ProjectSelection
-            ) {
-                Constraint::Percentage(70)
-            } else {
-                Constraint::Length(9)
-            },
-        );
-        frame.render_widget(Clear, centered_area);
-        let block = Block::bordered()
-            .border_type(BorderType::Rounded)
-            .padding(Padding::symmetric(1, 1))
-            .title("Start Tracker");
-        frame.render_widget(&block, centered_area);
-
-        let project_list = List::new(self.projects.iter().map(|p| {
-            ListItem::new(p.name.as_str())
-                .style(Style::new().fg(style::Color::from_str(&p.color).unwrap()))
-        }))
-        .highlight_style(Style::default().bg(Color::DarkGray))
-        .highlight_symbol("> ");
-        frame.render_stateful_widget(
-            project_list,
-            block.inner(centered_area),
-            &mut self.project_list_state,
-        );
-    }
-
-    fn render_start_edit_entry_mode(
-        &mut self,
-        frame: &mut Frame<'_>,
-        labels_area: Rect,
-        values_area: Rect,
-    ) {
-        let labels = List::new(vec![
-            Line::from("Project:"),
-            Line::from("Task:"),
-            Line::from("Description:"),
-        ]);
-        frame.render_stateful_widget(labels, labels_area, &mut self.start_new_tracker_list_state);
-
-        let project_name = create_input_list_item(
-            "select project...",
-            self.new_entry_to_start
-                .project
-                .as_ref()
-                .map(|p| p.name.clone()),
-        );
-        let task_name = create_input_list_item("select task...", None);
-        let desc = format_as_active_text_input(
-            &self.new_entry_to_start.description,
-            matches!(
-                self.start_tracker_mode,
-                StartTrackingState::EnterDescription
-            ),
-        );
-
-        let description = create_input_list_item("add description...", desc.into());
-        frame.render_stateful_widget(
-            List::new(vec![project_name, task_name, description])
-                .highlight_style(Style::default().bg(Color::DarkGray))
-                .highlight_symbol(">"),
-            values_area,
-            &mut self.start_new_tracker_list_state,
-        );
     }
 
     fn render_recent_entries(&self, frame: &mut Frame<'_>, area: Rect) {
@@ -266,164 +224,199 @@ impl Tracker {
         frame.render_widget(table, table_area);
     }
 
-    fn get_active_entry_info(&self) -> Option<TrackingInfo> {
-        match &self.active_entry {
-            Some(entry) => {
-                let project = self.projects.iter().find(|p| p.id == entry.project_id);
-                let project_color = project.map_or(style::Color::Yellow, |p| {
-                    style::Color::from_str(&p.color).unwrap_or_default()
-                });
-
-                let duration = delta_hms(&entry.start_time, &entry.end_time);
-                let project_name = project.map_or("None".to_string(), |p| p.name.clone());
-                let description = entry.description.clone();
-                Some(TrackingInfo {
-                    duration,
-                    project_name,
-                    project_color,
-                    task: "-".to_owned(),
-                    description,
-                })
-            }
-            None => None,
-        }
-    }
-
     pub fn handle_key_event(&mut self, key_event: KeyEvent) -> Option<PageAction> {
-        let action = match self.mode {
-            Mode::Main => self.handle_key_events_in_normal_mode(key_event),
-            Mode::StartNewEntry => self.handle_key_events_start_tracking(key_event),
-            Mode::EditActiveEntry => self.handle_key_events_start_tracking(key_event),
+        let action = match &mut self.timer_mode {
+            TimerMode::NoRunningEntry => {
+                match key_event.code {
+                    KeyCode::Char('s') => {
+                        self.timer_mode = TimerMode::StartNewEntry(StartNewEntryState::default());
+                    }
+                    KeyCode::Char('q') => {}
+                    _ => (),
+                };
+                None
+            }
+            TimerMode::ShowActiveEntry(time_entry) => match key_event.code {
+                KeyCode::Char('s') => {
+                    let entry_id = time_entry.id;
+                    self.timer_mode = TimerMode::NoRunningEntry;
+                    Some(TrackerAction::StopTracking { entry_id })
+                }
+                KeyCode::Char('e') => {
+                    self.timer_mode = TimerMode::EditActiveEntry(EditActiveEntryState {
+                        active_entry: time_entry.clone(),
+                        mode: StartTrackingState::ReviewBeforeStart,
+                        menu_list_state: ListState::default().with_selected(Some(0)),
+                        project_list_state: ListState::default().with_selected(Some(0)),
+                    });
+                    None
+                }
+                _ => None,
+            },
+            TimerMode::StartNewEntry(state) => {
+                let action: Option<TrackerAction> = match &mut state.mode {
+                    StartTrackingState::ProjectSelection => {
+                        match key_event.code {
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                state.project_list_state.select_previous();
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                state.project_list_state.select_next();
+                            }
+                            KeyCode::Enter => {
+                                let idx = state.project_list_state.selected().unwrap();
+                                let selected_project = self.projects[idx].clone();
+                                state.new_entry.project = Some(selected_project);
+                                // TODO: continue with task selection
+                                state.mode = StartTrackingState::ReviewBeforeStart;
+                            }
+                            KeyCode::Esc => state.mode = StartTrackingState::ReviewBeforeStart,
+                            _ => (),
+                        };
+                        None
+                    }
+
+                    StartTrackingState::TaskSelection => {
+                        if let KeyCode::Enter = key_event.code {
+                            state.menu_list_state.select_next();
+                            state.mode = StartTrackingState::ReviewBeforeStart;
+                        }
+                        None
+                    }
+                    StartTrackingState::EnterDescription => match key_event.code {
+                        KeyCode::Char(c) => {
+                            state.new_entry.description.push(c);
+                            Some(TrackerAction::ConsumedKey)
+                        }
+                        KeyCode::Backspace => {
+                            state.new_entry.description.pop();
+                            None
+                        }
+                        KeyCode::Enter | KeyCode::Esc => {
+                            state.mode = StartTrackingState::ReviewBeforeStart;
+                            None
+                        }
+                        _ => None,
+                    },
+                    StartTrackingState::ReviewBeforeStart => match key_event.code {
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            state.menu_list_state.select_previous();
+                            Some(TrackerAction::ConsumedKey)
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            state.menu_list_state.select_next();
+                            Some(TrackerAction::ConsumedKey)
+                        }
+                        KeyCode::Char('s') if state.new_entry.project.is_some() => {
+                            let start_tracking_action = StartTracking {
+                                project_id: state.new_entry.project.as_ref().unwrap().id,
+                                description: state.new_entry.description.clone(),
+                                task_id: None,
+                            };
+                            self.timer_mode = TimerMode::NoRunningEntry;
+                            // Showing the new timer will be triggered by the app after a database
+                            // entry has been created
+                            Some(start_tracking_action)
+                        }
+                        KeyCode::Enter => {
+                            state.mode = StartTrackingState::from_usize(
+                                state.menu_list_state.selected().unwrap_or(0),
+                            )
+                            .unwrap();
+                            Some(TrackerAction::ConsumedKey)
+                        }
+                        KeyCode::Esc | KeyCode::Char('q') => {
+                            self.timer_mode = TimerMode::NoRunningEntry;
+                            Some(TrackerAction::ConsumedKey)
+                        }
+                        _ => None,
+                    },
+                };
+                action
+            }
+            TimerMode::EditActiveEntry(state) => {
+                // Todo port the logic for submenu: project selection, task selection, description input
+                let action: Option<TrackerAction> = match &mut state.mode {
+                    StartTrackingState::ProjectSelection => {
+                        match key_event.code {
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                state.project_list_state.select_previous();
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                state.project_list_state.select_next();
+                            }
+                            KeyCode::Enter => {
+                                let idx = state.project_list_state.selected().unwrap();
+                                let selected_project = self.projects[idx].clone();
+                                state.active_entry.project_id = selected_project.id;
+                                // TODO: continue with task selection
+                                state.mode = StartTrackingState::ReviewBeforeStart;
+                            }
+                            KeyCode::Esc => state.mode = StartTrackingState::ReviewBeforeStart,
+                            _ => (),
+                        };
+                        None
+                    }
+
+                    StartTrackingState::TaskSelection => {
+                        if let KeyCode::Enter = key_event.code {
+                            state.menu_list_state.select_next();
+                            state.mode = StartTrackingState::ReviewBeforeStart;
+                        }
+                        None
+                    }
+                    StartTrackingState::EnterDescription => match key_event.code {
+                        KeyCode::Char(c) => {
+                            state.active_entry.description.push(c);
+                            Some(TrackerAction::ConsumedKey)
+                        }
+                        KeyCode::Backspace => {
+                            state.active_entry.description.pop();
+                            None
+                        }
+                        KeyCode::Enter | KeyCode::Esc => {
+                            state.mode = StartTrackingState::ReviewBeforeStart;
+                            None
+                        }
+                        _ => None,
+                    },
+                    StartTrackingState::ReviewBeforeStart => match key_event.code {
+                        KeyCode::Char('d') => {
+                            let entry = state.active_entry.clone();
+                            self.timer_mode = TimerMode::ShowActiveEntry(entry.clone());
+                            Some(TrackerAction::UpdateEntry(entry))
+                        }
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            state.menu_list_state.select_previous();
+                            None
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            state.menu_list_state.select_next();
+                            None
+                        }
+                        KeyCode::Enter => {
+                            state.mode = StartTrackingState::from_usize(
+                                state.menu_list_state.selected().unwrap_or(0),
+                            )
+                            .unwrap();
+                            Some(TrackerAction::ConsumedKey)
+                        }
+                        KeyCode::Esc => {
+                            let entry = state.active_entry.clone();
+                            self.timer_mode = TimerMode::ShowActiveEntry(entry);
+                            Some(TrackerAction::ConsumedKey)
+                        }
+                        _ => None,
+                    },
+                };
+                action
+            }
         };
         action.map_or_default(|a| Some(PageAction::Tracker(a)))
     }
 
-    fn handle_key_events_in_normal_mode(&mut self, key_event: KeyEvent) -> Option<TrackerAction> {
-        match key_event.code {
-            KeyCode::Char('s') if let Some(entry) = &self.active_entry => {
-                self.new_entry_to_start = NewEntryStartInfo::new();
-                Some(TrackerAction::StopTracking { entry_id: entry.id })
-            }
-            KeyCode::Char('s') => {
-                self.mode = Mode::StartNewEntry;
-                Some(ConsumedKey)
-            }
-            KeyCode::Char('e') => {
-                self.mode = Mode::EditActiveEntry;
-                Some(ConsumedKey)
-            }
-            _ => None,
-        }
-    }
-
-    fn handle_key_events_start_tracking(&mut self, key_event: KeyEvent) -> Option<TrackerAction> {
-        match self.start_tracker_mode {
-            StartTrackingState::ProjectSelection => {
-                match key_event.code {
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        self.project_list_state.select_previous();
-                    }
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        self.project_list_state.select_next();
-                    }
-                    KeyCode::Enter => {
-                        let idx = self.project_list_state.selected().unwrap();
-                        let selected_project = self.projects[idx].clone();
-                        self.new_entry_to_start.project = Some(selected_project);
-                        // TODO: continue with task selection
-                        self.start_tracker_mode = StartTrackingState::ReviewBeforeStart;
-                    }
-                    KeyCode::Esc => self.start_tracker_mode = StartTrackingState::ReviewBeforeStart,
-                    _ => (),
-                };
-                Some(ConsumedKey)
-            }
-            StartTrackingState::TaskSelection => {
-                if let KeyCode::Enter = key_event.code {
-                    self.start_new_tracker_list_state.select_next();
-                    self.start_tracker_mode = StartTrackingState::ReviewBeforeStart;
-                }
-                Some(ConsumedKey)
-            }
-            StartTrackingState::EnterDescription => {
-                match key_event.code {
-                    KeyCode::Char(c) => {
-                        self.new_entry_to_start.description.push(c);
-                    }
-                    KeyCode::Backspace => {
-                        self.new_entry_to_start.description.pop();
-                    }
-                    KeyCode::Enter | KeyCode::Esc => {
-                        self.start_tracker_mode = StartTrackingState::ReviewBeforeStart
-                    }
-                    _ => (),
-                };
-                Some(ConsumedKey)
-            }
-            StartTrackingState::ReviewBeforeStart => match key_event.code {
-                KeyCode::Up | KeyCode::Char('k') => {
-                    self.start_new_tracker_list_state.select_previous();
-                    Some(ConsumedKey)
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    self.start_new_tracker_list_state.select_next();
-                    Some(ConsumedKey)
-                }
-                KeyCode::Char('s') if self.new_entry_to_start.project.is_some() => {
-                    if matches!(self.mode, Mode::StartNewEntry) {
-                        self.mode = Mode::Main;
-                        return Some(StartTracking {
-                            project_id: self.new_entry_to_start.project.as_ref().unwrap().id,
-                            description: self.new_entry_to_start.description.clone(),
-                            task_id: None,
-                        });
-                    }
-                    Some(TrackerAction::ConsumedKey)
-                }
-                KeyCode::Char('d') if matches!(self.mode, Mode::EditActiveEntry) => {
-                    self.mode = Mode::Main;
-                    self.active_entry = match &self.active_entry {
-                        Some(e) => Some(TimeEntry {
-                            id: e.id,
-                            project_id: self.new_entry_to_start.project.clone().unwrap().id,
-                            task_id: e.task_id,
-                            description: self.new_entry_to_start.description.clone(),
-                            start_time: e.start_time,
-                            end_time: e.end_time,
-                            created_at: e.created_at,
-                        }),
-                        None => None,
-                    };
-                    Some(TrackerAction::UpdateEntry(self.active_entry.clone()))
-                }
-                KeyCode::Enter => {
-                    self.start_tracker_mode = StartTrackingState::from_usize(
-                        self.start_new_tracker_list_state.selected().unwrap_or(0),
-                    )
-                    .unwrap();
-                    Some(ConsumedKey)
-                }
-                KeyCode::Esc | KeyCode::Char('q') => {
-                    self.mode = Mode::Main;
-                    Some(ConsumedKey)
-                }
-                _ => None,
-            },
-        }
-    }
-
     fn render_tracker(&mut self, frame: &mut Frame<'_>, area: Rect) {
-        let info = self.get_active_entry_info();
         let block = Block::bordered()
-            .title(if info.is_some() {
-                " TRACKING "
-            } else if matches!(self.mode, Mode::StartNewEntry) {
-                " STARTING TRACKER "
-            } else if matches!(self.mode, Mode::EditActiveEntry) {
-                " EDITING TRACKER "
-            } else {
-                " READY "
-            })
             .border_type(ratatui::widgets::BorderType::Rounded)
             .padding(Padding::horizontal(1));
         let tracker_area = block.inner(area);
@@ -433,20 +426,109 @@ impl Tracker {
             Layout::vertical([Constraint::Length(1), Constraint::Length(3)]).areas(tracker_area);
         let [labels_area, values_area] = Layout::horizontal(columns).areas(info_area);
 
-        frame.render_widget(&block, area);
+        match &mut self.timer_mode {
+            TimerMode::NoRunningEntry => {
+                let block = block.title(" READY ");
+                frame.render_widget(block, area);
+                render_no_active_tracker(frame, tracker_area);
+            }
+            TimerMode::ShowActiveEntry(entry) => {
+                let block = block.title(" RUNNING ");
+                frame.render_widget(block, area);
+                let project = self.projects.iter().find(|p| p.id == entry.project_id);
+                let project_color = project.map_or(style::Color::Yellow, |p| {
+                    style::Color::from_str(&p.color).unwrap_or_default()
+                });
 
-        match self.mode {
-            Mode::Main => {
-                if info.is_none() {
-                    render_no_active_tracker(frame, tracker_area);
-                    return;
-                }
-                render_active_tracker_info(frame, info, time_area, labels_area, values_area);
+                let duration = delta_hms(&entry.start_time, &entry.end_time);
+                let project_name = project.map_or("None".to_string(), |p| p.name.clone());
+                let description = entry.description.clone();
+
+                render_active_tracker_info_value(
+                    frame,
+                    TrackingInfo {
+                        duration,
+                        project_name,
+                        project_color,
+                        task: "".into(),
+                        description,
+                    },
+                    time_area,
+                    labels_area,
+                    values_area,
+                );
             }
-            Mode::EditActiveEntry | Mode::StartNewEntry => {
-                self.render_start_edit_entry_mode(frame, labels_area, values_area);
+            TimerMode::StartNewEntry(state) => {
+                let block = block.title(" STARTING TRACKER ");
+                frame.render_widget(block, area);
+
+                let labels = List::new(vec![
+                    Line::from("Project:"),
+                    Line::from("Task:"),
+                    Line::from("Description:"),
+                ]);
+                frame.render_stateful_widget(labels, labels_area, &mut state.menu_list_state);
+
+                let project_name = create_input_list_item(
+                    "select project...",
+                    state.new_entry.project.as_ref().map(|p| p.name.clone()),
+                );
+                let task_name = create_input_list_item("select task...", None);
+                let desc = format_as_active_text_input(
+                    &state.new_entry.description,
+                    matches!(state.mode, StartTrackingState::EnterDescription),
+                );
+
+                let description = create_input_list_item("add description...", desc.into());
+                frame.render_stateful_widget(
+                    List::new(vec![project_name, task_name, description])
+                        .highlight_style(Style::default().bg(Color::DarkGray))
+                        .highlight_symbol(">"),
+                    values_area,
+                    &mut state.menu_list_state,
+                );
             }
-        };
+            TimerMode::EditActiveEntry(state) => {
+                let block = block.title(" STARTING TRACKER ");
+                frame.render_widget(block, area);
+
+                let labels = List::new(vec![
+                    Line::from("Project:"),
+                    Line::from("Task:"),
+                    Line::from("Description:"),
+                    Line::from("Start Time:"),
+                ]);
+                frame.render_stateful_widget(labels, labels_area, &mut state.menu_list_state);
+
+                let project = self
+                    .projects
+                    .iter()
+                    .find(|p| p.id == state.active_entry.project_id);
+                let project_color = project.map_or(style::Color::Yellow, |p| {
+                    style::Color::from_str(&p.color).unwrap_or_default()
+                });
+
+                let start_time = format_timestamp(&state.active_entry.start_time);
+                let project_name = project.map(|p| p.name.clone());
+
+                let project_name = create_input_list_item("select project...", project_name);
+                let task_name = create_input_list_item("select task...", None);
+                let desc = format_as_active_text_input(
+                    &state.active_entry.description,
+                    matches!(state.mode, StartTrackingState::EnterDescription),
+                );
+
+                let description = create_input_list_item("add description...", desc.into());
+                let start_time = ListItem::from(start_time);
+                frame.render_stateful_widget(
+                    List::new(vec![project_name, task_name, description, start_time])
+                        .highlight_style(Style::default().bg(Color::DarkGray))
+                        .highlight_symbol(">"),
+                    values_area,
+                    &mut state.menu_list_state,
+                );
+            }
+        }
     }
 
     fn render_todays_stats(&self, frame: &mut Frame<'_>, area: Rect) {
@@ -459,15 +541,12 @@ impl Tracker {
     }
 
     pub fn get_keybind_hints(&self) -> &str {
-        match self.mode {
-            Mode::Main => {
-                if self.active_entry.is_some() {
-                    "Navigate: ⇅  | Stop: s | Edit: e | Quit: q | Switch View: 1/2"
-                } else {
-                    "Navigate: ⇅  | Start: s | Quit: q | Switch View: 1/2"
-                }
+        match &self.timer_mode {
+            TimerMode::NoRunningEntry => "Navigate: ⇅  | Start: s | Quit: q | Switch View: 1/2",
+            TimerMode::ShowActiveEntry(_) => {
+                "Navigate: ⇅  | Stop: s | Edit: e | Quit: q | Switch View: 1/2"
             }
-            Mode::StartNewEntry => match self.start_tracker_mode {
+            TimerMode::StartNewEntry(state) => match state.mode {
                 StartTrackingState::ProjectSelection => {
                     "Navigate: ⇅  | Start: s | Quit: q | Switch View: 1/2"
                 }
@@ -479,11 +558,41 @@ impl Tracker {
                     "Navigate: ⇅  | Start: s | Edit: e | Quit: q | Switch View: 1/2"
                 }
             },
-            Mode::EditActiveEntry => {
+            TimerMode::EditActiveEntry(_) => {
                 "Navigate: ⇅  | Start/Stop: s | Edit: e | Quit: q | Switch View: 1/2"
             }
         }
     }
+}
+
+fn render_active_tracker_info_value(
+    frame: &mut Frame<'_>,
+    info: TrackingInfo,
+    time_area: Rect,
+    labels_area: Rect,
+    values_area: Rect,
+) {
+    frame.render_widget(
+        Paragraph::new(info.duration)
+            .style(style::Color::Green)
+            .centered(),
+        time_area,
+    );
+
+    let labels = Paragraph::new(vec![
+        Line::from("Project:"),
+        Line::from("Task:"),
+        Line::from("Description:"),
+    ]);
+    frame.render_widget(labels, labels_area);
+
+    let project_name = Line::from(info.project_name).style(info.project_color);
+    let task_name = Line::from(info.task);
+    let description = Line::from(info.description);
+    frame.render_widget(
+        Paragraph::new(vec![project_name, task_name, description]),
+        values_area,
+    );
 }
 
 fn render_active_tracker_info(
@@ -544,4 +653,27 @@ fn create_input_list_item(placeholder: &str, content: Option<String>) -> ListIte
         },
         Span::raw(" ]"),
     ]))
+}
+
+fn render_project_selection_list(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    projects: &[database::Project],
+    list_state: &mut ListState,
+) {
+    let centered_area = area.centered(Constraint::Percentage(50), Constraint::Percentage(70));
+    frame.render_widget(Clear, centered_area);
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .padding(Padding::symmetric(1, 1))
+        .title("Select Project");
+    frame.render_widget(&block, centered_area);
+
+    let project_list = List::new(projects.iter().map(|p| {
+        ListItem::new(p.name.as_str())
+            .style(Style::new().fg(style::Color::from_str(&p.color).unwrap()))
+    }))
+    .highlight_style(Style::default().bg(Color::DarkGray))
+    .highlight_symbol("> ");
+    frame.render_stateful_widget(project_list, block.inner(centered_area), list_state);
 }
