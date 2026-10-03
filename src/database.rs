@@ -54,8 +54,16 @@ pub struct DailyStats {
     pub longest_session: chrono::TimeDelta,
 }
 
+pub struct IntervalMetrics {
+    pub total_time: chrono::TimeDelta,
+    pub session_count: usize,
+}
 pub struct Summary {
     pub today: DailyStats,
+    pub today_metrics: IntervalMetrics,
+    pub week_metrics: IntervalMetrics,
+    pub month_metrics: IntervalMetrics,
+    pub total_metrics: IntervalMetrics,
 }
 
 impl TimeEntry {
@@ -170,7 +178,7 @@ impl Database {
     pub fn get_recent_entries(
         &self,
         limit: Option<u32>,
-        exclude_running_entry: bool,
+        include_running_entry: bool,
     ) -> rusqlite::Result<Vec<TimeEntry>> {
         let con = self.get_connection();
 
@@ -178,7 +186,7 @@ impl Database {
             "SELECT id, project_id, task_id, description, start_time, end_time, created_at
                      FROM time_entries {}
                      ORDER BY start_time DESC {}",
-            if exclude_running_entry {
+            if include_running_entry {
                 ""
             } else {
                 "WHERE end_time IS NOT NULL"
@@ -245,10 +253,35 @@ impl Database {
     // TODO Edge case, but unrealistic: handle tracking over midnight
     pub fn get_metrics_summary(&self) -> rusqlite::Result<Summary> {
         let all_entries = self.get_recent_entries(None, false)?;
+
+        // Helper days
         let today = Timezone::now();
-        let today_entries = all_entries
-            .iter()
-            .filter(|e| today.date_naive() == e.start_time.date_naive());
+        let this_week_first_day = today
+            .checked_sub_days(chrono::Days::new(
+                today.weekday().number_from_monday() as u64
+            ))
+            .expect("Unable to calculate fist week day");
+        let this_week_last_day = today
+            .checked_add_days(chrono::Days::new(
+                today.weekday().number_from_monday() as u64
+            ))
+            .expect("Unable to calculate last week day");
+
+        // Filter entries by time interval
+
+        let this_month_entries = all_entries.iter().filter(|e| {
+            e.start_time.year() == today.year() && e.start_time.month() == today.month()
+        });
+        let this_week_entries = this_month_entries.clone().filter(|e| {
+            this_week_first_day.day() <= e.start_time.day()
+                && e.start_time.day() <= this_week_last_day.day()
+        });
+        let today_entries = this_week_entries
+            .clone()
+            .filter(|e| today.day() == e.start_time.day());
+
+        // Condense metrics per interval
+
         let today_longest: chrono::TimeDelta = today_entries
             .clone()
             .map(|e| e.end_time.unwrap_or(Timezone::now()) - e.start_time)
@@ -258,12 +291,51 @@ impl Database {
             .clone()
             .map(|e| e.end_time.unwrap_or(Timezone::now()) - e.start_time)
             .sum();
+
+        let today_entries_count = today_entries.clone().count();
         let today_stats = DailyStats {
-            entries_count: today_entries.count(),
+            entries_count: today_entries_count,
             total_time: today_time_tracked,
             longest_session: today_longest,
         };
 
-        Ok(Summary { today: today_stats })
+        let today_metrics = IntervalMetrics {
+            total_time: today_entries
+                .map(|e| e.end_time.unwrap_or(Timezone::now()) - e.start_time)
+                .sum(),
+            session_count: today_entries_count,
+        };
+
+        let week_metrics = IntervalMetrics {
+            total_time: this_week_entries
+                .clone()
+                .map(|e| e.end_time.unwrap_or(Timezone::now()) - e.start_time)
+                .sum(),
+            session_count: this_week_entries.count(),
+        };
+        let month_metrics = IntervalMetrics {
+            total_time: this_month_entries
+                .clone()
+                .map(|e| e.end_time.unwrap_or(Timezone::now()) - e.start_time)
+                .sum(),
+            session_count: this_month_entries.count(),
+        };
+
+        let total_metrics = IntervalMetrics {
+            total_time: all_entries
+                .clone()
+                .iter()
+                .map(|e| e.end_time.unwrap_or(Timezone::now()) - e.start_time)
+                .sum(),
+            session_count: all_entries.len(),
+        };
+
+        Ok(Summary {
+            today: today_stats,
+            today_metrics,
+            week_metrics,
+            month_metrics,
+            total_metrics,
+        })
     }
 }
