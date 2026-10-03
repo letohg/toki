@@ -20,6 +20,7 @@ use strum_macros::EnumIter;
 use crate::database;
 use crate::pages;
 use crate::pages::PageAction;
+use crate::theme;
 
 #[derive(Debug, PartialEq, EnumIter)]
 enum View {
@@ -134,8 +135,9 @@ impl App {
         frame.render_widget(footer, bottom);
     }
 
-    fn render_navbar(&self, frame: &mut Frame, top: Rect) {
-        // let navbar = Block::new().borders(Borders::BOTTOM);
+    fn render_navbar(&self, frame: &mut Frame, area: Rect) {
+        let [tabs_area, appname_area] =
+            Layout::horizontal([Constraint::Min(25), Constraint::Length(13)]).areas(area);
 
         let views: Vec<Span> = View::iter()
             .enumerate()
@@ -159,7 +161,21 @@ impl App {
             .into_iter()
             .intersperse(" ".into())
             .collect();
-        frame.render_widget(Paragraph::new(Line::from(views)), top);
+
+        frame.render_widget(Paragraph::new(Line::from(views)), tabs_area);
+        frame.render_widget(
+            Paragraph::new(format!(
+                "● toki {} ",
+                pages::format_timestamp(&database::Timezone::now())
+            ))
+            .style(
+                Style::default()
+                    .add_modifier(Modifier::BOLD)
+                    .fg(theme::MAUVE),
+            )
+            .right_aligned(),
+            appname_area,
+        );
     }
 
     fn handle_events(&mut self) -> Result<()> {

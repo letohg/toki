@@ -1,6 +1,7 @@
 mod app;
 mod database;
 mod pages;
+mod theme;
 
 use crate::app::App;
 
