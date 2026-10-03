@@ -14,7 +14,7 @@ use ratatui::{
 };
 use std::str::FromStr;
 
-use crate::database::{self, EntityId, TimeEntry, Timezone};
+use crate::database::{self, EntityId, TimeEntry, Timestamp, Timezone};
 use crate::pages::delta_hms;
 use crate::pages::tracker::StartOrEditEntryState::ReviewBeforeStart;
 use crate::pages::tracker::TrackerAction::StartTracking;
@@ -100,6 +100,7 @@ struct NewEntryStartInfo {
 }
 
 pub struct Tracker {
+    now: Timestamp,
     recent_entries: Vec<database::TimeEntry>,
     projects: Vec<database::Project>,
     timer_mode: TimerMode,
@@ -109,6 +110,7 @@ pub struct Tracker {
 impl Tracker {
     pub fn new() -> Self {
         Self {
+            now: Timezone::now(),
             recent_entries: Vec::new(),
             projects: Vec::new(),
             timer_mode: TimerMode::NoRunningEntry,
@@ -134,6 +136,7 @@ impl Tracker {
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
+        self.now = Timezone::now();
         self.render_main_view(frame, area);
         match &mut self.timer_mode {
             TimerMode::StartNewEntry(state)
@@ -206,7 +209,10 @@ impl Tracker {
                     e.end_time
                         .map_or("Running".to_owned(), |ts| format_timestamp(&ts))
                 )),
-                Cell::from(format!("{:>8}", delta_hms(&e.start_time, &e.end_time))),
+                Cell::from(format!(
+                    "{:>8}",
+                    delta_hms(&e.start_time, &e.end_time.unwrap_or(self.now))
+                )),
             ])
             // TODO: better coloring
             .style(style::Style::default().bg(if i % 2 == 0 {
@@ -443,7 +449,7 @@ impl Tracker {
                     style::Color::from_str(&p.color).unwrap_or_default()
                 });
 
-                let duration = delta_hms(&entry.start_time, &entry.end_time);
+                let duration = delta_hms(&entry.start_time, &entry.end_time.unwrap_or(self.now));
                 let project_name = project.map_or("None".to_string(), |p| p.name.clone());
                 let description = entry.description.clone();
 
@@ -551,16 +557,16 @@ impl Tracker {
         ]);
         frame.render_widget(labels, labels_area);
 
+        let now = self.now;
         let mut today_session_count = self.todays_statistic.entries_count;
         let active_session_time = match &self.timer_mode {
             TimerMode::ShowActiveEntry(active_entry) => {
                 today_session_count += 1;
-                active_entry.end_time.unwrap_or(Timezone::now()) - active_entry.start_time
+                active_entry.end_time.unwrap_or(now) - active_entry.start_time
             }
             TimerMode::EditActiveEntry(state) => {
                 today_session_count += 1;
-                state.active_entry.end_time.unwrap_or(Timezone::now())
-                    - state.active_entry.start_time
+                state.active_entry.end_time.unwrap_or(now) - state.active_entry.start_time
             }
             _ => chrono::TimeDelta::zero(),
         };
@@ -568,10 +574,10 @@ impl Tracker {
         frame.render_widget(
             Paragraph::new(vec![
                 Line::from(format_delta_time_statistic(
-                    self.todays_statistic.total_time + active_session_time,
+                    &(self.todays_statistic.total_time + active_session_time),
                 )),
                 Line::from(today_session_count.to_string()),
-                Line::from(format_delta_time_statistic(std::cmp::max(
+                Line::from(format_delta_time_statistic(&std::cmp::max(
                     self.todays_statistic.longest_session,
                     active_session_time,
                 ))),
