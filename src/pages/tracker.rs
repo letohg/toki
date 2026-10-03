@@ -185,7 +185,7 @@ impl Tracker {
         let table_area = table_block.inner(entries_area);
 
         let headings = Row::new(
-            ["Project", "Task", "Description", "Time", "Total"]
+            ["Project", "Task", "Description", "Day", "Time", "Total"]
                 .into_iter()
                 .map(|t| Cell::from(t).bold()),
         );
@@ -199,6 +199,7 @@ impl Tracker {
                     .style(style::Style::new().fg(project_color)),
                 "-".into(),
                 Cell::from(e.description.clone()),
+                Cell::from(e.start_time.date_naive().to_string()),
                 Cell::from(format!(
                     "{} - {}",
                     format_timestamp(&e.start_time),
@@ -218,8 +219,9 @@ impl Tracker {
             Constraint::Length(15),
             Constraint::Min(0),
             Constraint::Min(0),
-            Constraint::Length(16), // start time - end time
-            Constraint::Length(8),  // duration
+            Constraint::Length(12), // start time - end time
+            Constraint::Length(18), // start time - end time
+            Constraint::Length(10), // duration
         ];
         let table = Table::new(rows, column_widths).header(headings);
         frame.render_widget(table, table_area);

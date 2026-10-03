@@ -6,6 +6,7 @@ use crate::{
 };
 
 pub mod projects;
+pub mod summary;
 pub mod tracker;
 
 pub enum PageAction {

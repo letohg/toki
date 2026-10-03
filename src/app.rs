@@ -25,11 +25,13 @@ use crate::pages::PageAction;
 enum View {
     Tracker,
     Projects,
+    Summary,
 }
 
 pub enum Page {
     Tracker(pages::tracker::Tracker),
     Projects(pages::projects::Project),
+    Summary(pages::summary::Summary),
 }
 
 pub struct App {
@@ -60,7 +62,7 @@ impl App {
     }
     fn update_state(&mut self) {
         let active_entry = self.db.get_running_entry().unwrap_or(None);
-        let recent_entries = self.db.get_recent_entries(Some(10), true).unwrap();
+        let recent_entries = self.db.get_recent_entries(None, true).unwrap();
 
         let projects = self.db.get_projects().unwrap(); // TODO: handle failure case
         let summary = self.db.get_metrics_summary().unwrap(); // TODO: handle failure case
@@ -70,6 +72,7 @@ impl App {
                 page.refresh(active_entry, recent_entries, projects, summary.today)
             }
             Page::Projects(page) => page.refresh(projects),
+            Page::Summary(page) => page.refresh(recent_entries, projects),
         }
     }
 
@@ -115,6 +118,7 @@ impl App {
         match &mut self.active_page {
             Page::Tracker(p) => p.render(frame, area),
             Page::Projects(p) => p.render(frame, area),
+            Page::Summary(p) => p.render(frame, area),
         }
     }
 
@@ -122,7 +126,8 @@ impl App {
         // TODO: move into page render logic
         let keybinds = match &self.active_page {
             Page::Tracker(p) => p.get_keybind_hints(),
-            Page::Projects(_) => "Navigate: ⇅  | Quit: q | Switch View: 1/2",
+            Page::Projects(_) => "Navigate: ⇅  | Quit: q | Switch View: 1-3",
+            Page::Summary(_) => "Navigate: ⇅  | Quit: q | Switch View: 1-3",
         };
         let [_, bottom] = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(area);
         let footer = Paragraph::new(keybinds);
@@ -137,7 +142,9 @@ impl App {
             .map(|(i, view)| -> Span {
                 let is_active = matches!(
                     (&self.active_page, &view),
-                    (&Page::Tracker(_), &View::Tracker) | (&Page::Projects(_), &View::Projects)
+                    (&Page::Tracker(_), &View::Tracker)
+                        | (&Page::Projects(_), &View::Projects)
+                        | (&Page::Summary(_), &View::Summary)
                 );
                 let label = format!("[{}] {:?}", i + 1, view);
                 if !is_active {
@@ -197,6 +204,10 @@ impl App {
                 self.active_page = Page::Projects(pages::projects::Project::new());
                 true
             }
+            KeyCode::Char('3') => {
+                self.active_page = Page::Summary(pages::summary::Summary::new());
+                true
+            }
             _ => false,
         }
     }
@@ -215,6 +226,7 @@ impl App {
                 Ok(false)
             }
             Page::Projects(p) => Ok(p.handle_key_event(key_event)),
+            Page::Summary(p) => Ok(p.handle_key_event(key_event)),
         }
     }
 
