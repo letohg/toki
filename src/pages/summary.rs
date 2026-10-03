@@ -4,7 +4,7 @@ use itertools::Itertools;
 use ratatui::layout::Layout;
 use ratatui::style::{self, Stylize};
 use ratatui::symbols::bar;
-use ratatui::text::Span;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     self, Bar, Block, BorderType, Borders, Cell, Padding, Paragraph, Row, Table,
 };
@@ -84,9 +84,39 @@ impl Summary {
             }),
             column_widths,
         );
+        let bars = montly_time_per_project
+            .iter()
+            .map(|(p, h)| {
+                Bar::with_label(p.name.clone(), h.num_hours() as u64)
+                    .text_value("")
+                    .style(style::Color::from_str(&p.color).unwrap_or_default())
+            })
+            .collect::<Vec<Bar>>();
 
-        frame.render_widget(&details_block, stats_area);
-        frame.render_widget(details_table, details_block.inner(stats_area));
+        let details_area = details_block.inner(stats_area);
+        let project_times_chart = ratatui::widgets::BarChart::new(bars)
+            .block(details_block.clone())
+            .direction(ratatui::layout::Direction::Horizontal)
+            .bar_width(1)
+            .bar_style(Style::new().light_blue())
+            .max((40.0 * 4.5) as u64)
+            .value_style(Style::new().italic().bold())
+            .label_style(Style::new().white());
+        frame.render_widget(project_times_chart, details_area);
+        frame.render_widget(
+            Paragraph::new(
+                montly_time_per_project
+                    .iter()
+                    .map(|(p, h)| {
+                        Span::from(format_delta_time_statistic(h)).into_right_aligned_line()
+                    })
+                    .intersperse(Line::from(""))
+                    .collect::<Vec<Line>>(),
+            )
+            .block(details_block),
+            details_area,
+        );
+        // frame.render_widget(details_table, details_area);
     }
 
     fn render_monthly_barchart(&self, frame: &mut Frame<'_>, chart_area: Rect) {
