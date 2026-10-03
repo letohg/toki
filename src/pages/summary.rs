@@ -141,7 +141,7 @@ impl Summary {
                                     .sum::<chrono::TimeDelta>(),
                             )
                         })
-                        .max()
+                        .max_by(|(_, duration1), (_, duration2)| Ord::cmp(duration1, duration2))
                         .map(|(project_id, _)| {
                             self.projects.iter().find(|p| p.id == project_id).map_or(
                                 style::Color::White,
