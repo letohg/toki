@@ -33,7 +33,7 @@ impl Project {
         let table_area = table_block.inner(entries_area);
 
         let headings = Row::new(
-            ["Project", "Description", "Total Hours"]
+            ["Name", "Description", "Total Hours"]
                 .into_iter()
                 .map(|t| Cell::from(t).bold()),
         );
@@ -50,7 +50,9 @@ impl Project {
             Constraint::Min(7),
             Constraint::Length(10),
         ];
-        let table = Table::new(rows, column_widths);
+        let table = Table::new(rows, column_widths)
+            .header(headings)
+            .style(Style::new().add_modifier(style::Modifier::BOLD));
         frame.render_widget(table, table_area);
     }
 

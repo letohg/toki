@@ -59,13 +59,16 @@ impl App {
         Ok(())
     }
     fn update_state(&mut self) {
-        let active_entry = self.db.get_running_entry();
-        let recent_entries = self.db.get_recent_entries(10);
+        let active_entry = self.db.get_running_entry().unwrap_or(None);
+        let recent_entries = self.db.get_recent_entries(Some(10), true).unwrap();
 
         let projects = self.db.get_projects().unwrap(); // TODO: handle failure case
+        let summary = self.db.get_metrics_summary().unwrap(); // TODO: handle failure case
 
         match &mut self.active_page {
-            Page::Tracker(page) => page.refresh(active_entry, recent_entries, projects),
+            Page::Tracker(page) => {
+                page.refresh(active_entry, recent_entries, projects, summary.today)
+            }
             Page::Projects(page) => page.refresh(projects),
         }
     }

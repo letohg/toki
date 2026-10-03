@@ -1,6 +1,8 @@
-use chrono::Timelike;
+use chrono::{Datelike, Timelike};
 use resolve_path::PathResolveExt;
 use rusqlite::OptionalExtension;
+
+use crate::database;
 
 pub type EntityId = i64;
 pub type Timezone = chrono::Utc;
@@ -43,6 +45,17 @@ pub struct TimeEntry {
     pub start_time: Timestamp,
     pub end_time: Option<Timestamp>,
     pub created_at: Timestamp,
+}
+
+#[derive(Default)]
+pub struct DailyStats {
+    pub entries_count: usize,
+    pub total_time: chrono::TimeDelta,
+    pub longest_session: chrono::TimeDelta,
+}
+
+pub struct Summary {
+    pub today: DailyStats,
 }
 
 impl TimeEntry {
@@ -116,7 +129,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_running_entry(&self) -> Option<TimeEntry> {
+    pub fn get_running_entry(&self) -> rusqlite::Result<Option<TimeEntry>> {
         let con = self.get_connection();
         con.query_row(
             "SELECT id, project_id, task_id, description, start_time, end_time, created_at
@@ -135,7 +148,6 @@ impl Database {
             },
         )
         .optional()
-        .unwrap_or(None)
     }
 
     pub fn update_entry(&self, updated_entry: TimeEntry) -> rusqlite::Result<()> {
@@ -155,32 +167,61 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_recent_entries(&self, limit: u32) -> Vec<TimeEntry> {
+    pub fn get_recent_entries(
+        &self,
+        limit: Option<u32>,
+        exclude_running_entry: bool,
+    ) -> rusqlite::Result<Vec<TimeEntry>> {
         let con = self.get_connection();
 
-        let mut stmt = con
-            .prepare(
-                "SELECT id, project_id, task_id, description, start_time, end_time, created_at
-         FROM time_entries 
-         ORDER BY start_time DESC LIMIT ?",
-                // WHERE end_time IS NOT NULL // include the active one in the list
-            )
-            .unwrap();
+        let query = format!(
+            "SELECT id, project_id, task_id, description, start_time, end_time, created_at
+                     FROM time_entries {}
+                     ORDER BY start_time DESC {}",
+            if exclude_running_entry {
+                ""
+            } else {
+                "WHERE end_time IS NOT NULL"
+            },
+            match limit {
+                Some(_) => "LIMIT ?",
+                None => "",
+            },
+        ); // include the active one in the list
+        match limit {
+            Some(limit) => {
+                let mut stmt = con.prepare(&query)?;
 
-        let entries = stmt
-            .query_map([limit], |row| {
-                Ok(TimeEntry {
-                    id: row.get(0)?,
-                    project_id: row.get(1)?,
-                    task_id: row.get(2).unwrap_or(None),
-                    description: row.get(3)?,
-                    start_time: string_to_ts(row.get(4)?),
-                    end_time: row.get(5).map_or(None, |ts| Some(string_to_ts(ts))),
-                    created_at: string_to_ts(row.get(6)?),
-                })
-            })
-            .unwrap();
-        entries.filter_map(|e| e.ok()).collect()
+                let entries = stmt.query_map([limit], |row| {
+                    Ok(TimeEntry {
+                        id: row.get(0)?,
+                        project_id: row.get(1)?,
+                        task_id: row.get(2).unwrap_or(None),
+                        description: row.get(3)?,
+                        start_time: string_to_ts(row.get(4)?),
+                        end_time: row.get(5).map_or(None, |ts| Some(string_to_ts(ts))),
+                        created_at: string_to_ts(row.get(6)?),
+                    })
+                })?;
+                Ok(entries.filter_map(|e| e.ok()).collect())
+            }
+            None => {
+                let mut stmt = con.prepare(&query)?;
+
+                let entries = stmt.query_map([], |row| {
+                    Ok(TimeEntry {
+                        id: row.get(0)?,
+                        project_id: row.get(1)?,
+                        task_id: row.get(2).unwrap_or(None),
+                        description: row.get(3)?,
+                        start_time: string_to_ts(row.get(4)?),
+                        end_time: row.get(5).map_or(None, |ts| Some(string_to_ts(ts))),
+                        created_at: string_to_ts(row.get(6)?),
+                    })
+                })?;
+                Ok(entries.filter_map(|e| e.ok()).collect())
+            }
+        }
     }
 
     pub fn get_projects(&self) -> rusqlite::Result<Vec<Project>> {
@@ -199,5 +240,30 @@ impl Database {
             })
         })?;
         Ok(projects.filter_map(|p| p.ok()).collect())
+    }
+
+    // TODO Edge case, but unrealistic: handle tracking over midnight
+    pub fn get_metrics_summary(&self) -> rusqlite::Result<Summary> {
+        let all_entries = self.get_recent_entries(None, false)?;
+        let today = Timezone::now();
+        let today_entries = all_entries
+            .iter()
+            .filter(|e| today.date_naive() == e.start_time.date_naive());
+        let today_longest: chrono::TimeDelta = today_entries
+            .clone()
+            .map(|e| e.end_time.unwrap_or(Timezone::now()) - e.start_time)
+            .max()
+            .unwrap_or(chrono::TimeDelta::zero());
+        let today_time_tracked: chrono::TimeDelta = today_entries
+            .clone()
+            .map(|e| e.end_time.unwrap_or(Timezone::now()) - e.start_time)
+            .sum();
+        let today_stats = DailyStats {
+            entries_count: today_entries.count(),
+            total_time: today_time_tracked,
+            longest_session: today_longest,
+        };
+
+        Ok(Summary { today: today_stats })
     }
 }

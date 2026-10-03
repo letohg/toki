@@ -1,10 +1,9 @@
-use itertools::Itertools;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::style::{self, Color, Style, Stylize};
-use ratatui::text::{Line, Span, Text, ToLine};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     Block, BorderType, Borders, Clear, List, ListItem, ListState, Padding, Wrap,
 };
@@ -15,14 +14,14 @@ use ratatui::{
 };
 use std::str::FromStr;
 
-use crate::database::{self, EntityId, Project, TimeEntry};
-use crate::pages::tracker::StartTrackingState::ReviewBeforeStart;
-use crate::pages::tracker::TrackerAction::{ConsumedKey, StartTracking};
-use crate::pages::{PageAction, format_timestamp};
-use crate::pages::{delta_hms, tracker};
+use crate::database::{self, EntityId, TimeEntry, Timezone};
+use crate::pages::delta_hms;
+use crate::pages::tracker::StartOrEditEntryState::ReviewBeforeStart;
+use crate::pages::tracker::TrackerAction::StartTracking;
+use crate::pages::{PageAction, format_delta_time_statistic, format_timestamp};
 
 #[derive(Clone, FromPrimitive)]
-enum StartTrackingState {
+enum StartOrEditEntryState {
     ProjectSelection,
     TaskSelection,
     EnterDescription,
@@ -32,7 +31,7 @@ enum StartTrackingState {
 #[derive(Clone)]
 struct StartNewEntryState {
     new_entry: NewEntryStartInfo,
-    mode: StartTrackingState,
+    mode: StartOrEditEntryState,
     menu_list_state: ListState,
     project_list_state: ListState,
 }
@@ -40,7 +39,7 @@ impl StartNewEntryState {
     fn default() -> Self {
         Self {
             new_entry: NewEntryStartInfo::default(),
-            mode: StartTrackingState::ReviewBeforeStart,
+            mode: StartOrEditEntryState::ReviewBeforeStart,
             menu_list_state: ListState::default().with_selected(Some(0)),
             project_list_state: ListState::default().with_selected(Some(0)),
         }
@@ -50,7 +49,7 @@ impl StartNewEntryState {
 #[derive(Clone)]
 struct EditActiveEntryState {
     active_entry: database::TimeEntry,
-    mode: StartTrackingState,
+    mode: StartOrEditEntryState,
     menu_list_state: ListState,
     project_list_state: ListState,
 }
@@ -58,7 +57,7 @@ impl EditActiveEntryState {
     fn default() -> Self {
         Self {
             active_entry: TimeEntry::default(),
-            mode: StartTrackingState::ReviewBeforeStart,
+            mode: StartOrEditEntryState::ReviewBeforeStart,
             menu_list_state: ListState::default().with_selected(Some(0)),
             project_list_state: ListState::default().with_selected(Some(0)),
         }
@@ -104,7 +103,7 @@ pub struct Tracker {
     recent_entries: Vec<database::TimeEntry>,
     projects: Vec<database::Project>,
     timer_mode: TimerMode,
-    start_tracker_mode: StartTrackingState,
+    todays_statistic: database::DailyStats,
 }
 
 impl Tracker {
@@ -113,7 +112,7 @@ impl Tracker {
             recent_entries: Vec::new(),
             projects: Vec::new(),
             timer_mode: TimerMode::NoRunningEntry,
-            start_tracker_mode: StartTrackingState::ReviewBeforeStart,
+            todays_statistic: database::DailyStats::default(),
         }
     }
 
@@ -123,6 +122,7 @@ impl Tracker {
         recent_entries: Vec<database::TimeEntry>,
 
         projects: Vec<database::Project>,
+        todays_statistic: database::DailyStats,
     ) {
         if let Some(e) = active_entry {
             self.timer_mode = TimerMode::ShowActiveEntry(e);
@@ -130,13 +130,14 @@ impl Tracker {
 
         self.recent_entries = recent_entries;
         self.projects = projects;
+        self.todays_statistic = todays_statistic;
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
         self.render_main_view(frame, area);
         match &mut self.timer_mode {
             TimerMode::StartNewEntry(state)
-                if matches!(state.mode, StartTrackingState::ProjectSelection) =>
+                if matches!(state.mode, StartOrEditEntryState::ProjectSelection) =>
             {
                 render_project_selection_list(
                     frame,
@@ -146,7 +147,7 @@ impl Tracker {
                 )
             }
             TimerMode::EditActiveEntry(state)
-                if matches!(state.mode, StartTrackingState::ProjectSelection) =>
+                if matches!(state.mode, StartOrEditEntryState::ProjectSelection) =>
             {
                 render_project_selection_list(
                     frame,
@@ -245,7 +246,7 @@ impl Tracker {
                 KeyCode::Char('e') => {
                     self.timer_mode = TimerMode::EditActiveEntry(EditActiveEntryState {
                         active_entry: time_entry.clone(),
-                        mode: StartTrackingState::ReviewBeforeStart,
+                        mode: StartOrEditEntryState::ReviewBeforeStart,
                         menu_list_state: ListState::default().with_selected(Some(0)),
                         project_list_state: ListState::default().with_selected(Some(0)),
                     });
@@ -255,7 +256,7 @@ impl Tracker {
             },
             TimerMode::StartNewEntry(state) => {
                 let action: Option<TrackerAction> = match &mut state.mode {
-                    StartTrackingState::ProjectSelection => {
+                    StartOrEditEntryState::ProjectSelection => {
                         match key_event.code {
                             KeyCode::Up | KeyCode::Char('k') => {
                                 state.project_list_state.select_previous();
@@ -268,22 +269,22 @@ impl Tracker {
                                 let selected_project = self.projects[idx].clone();
                                 state.new_entry.project = Some(selected_project);
                                 // TODO: continue with task selection
-                                state.mode = StartTrackingState::ReviewBeforeStart;
+                                state.mode = StartOrEditEntryState::ReviewBeforeStart;
                             }
-                            KeyCode::Esc => state.mode = StartTrackingState::ReviewBeforeStart,
+                            KeyCode::Esc => state.mode = StartOrEditEntryState::ReviewBeforeStart,
                             _ => (),
                         };
                         None
                     }
 
-                    StartTrackingState::TaskSelection => {
+                    StartOrEditEntryState::TaskSelection => {
                         if let KeyCode::Enter = key_event.code {
                             state.menu_list_state.select_next();
-                            state.mode = StartTrackingState::ReviewBeforeStart;
+                            state.mode = StartOrEditEntryState::ReviewBeforeStart;
                         }
                         None
                     }
-                    StartTrackingState::EnterDescription => match key_event.code {
+                    StartOrEditEntryState::EnterDescription => match key_event.code {
                         KeyCode::Char(c) => {
                             state.new_entry.description.push(c);
                             Some(TrackerAction::ConsumedKey)
@@ -293,12 +294,12 @@ impl Tracker {
                             None
                         }
                         KeyCode::Enter | KeyCode::Esc => {
-                            state.mode = StartTrackingState::ReviewBeforeStart;
+                            state.mode = StartOrEditEntryState::ReviewBeforeStart;
                             None
                         }
                         _ => None,
                     },
-                    StartTrackingState::ReviewBeforeStart => match key_event.code {
+                    StartOrEditEntryState::ReviewBeforeStart => match key_event.code {
                         KeyCode::Up | KeyCode::Char('k') => {
                             state.menu_list_state.select_previous();
                             Some(TrackerAction::ConsumedKey)
@@ -319,7 +320,7 @@ impl Tracker {
                             Some(start_tracking_action)
                         }
                         KeyCode::Enter => {
-                            state.mode = StartTrackingState::from_usize(
+                            state.mode = StartOrEditEntryState::from_usize(
                                 state.menu_list_state.selected().unwrap_or(0),
                             )
                             .unwrap();
@@ -337,7 +338,7 @@ impl Tracker {
             TimerMode::EditActiveEntry(state) => {
                 // Todo port the logic for submenu: project selection, task selection, description input
                 let action: Option<TrackerAction> = match &mut state.mode {
-                    StartTrackingState::ProjectSelection => {
+                    StartOrEditEntryState::ProjectSelection => {
                         match key_event.code {
                             KeyCode::Up | KeyCode::Char('k') => {
                                 state.project_list_state.select_previous();
@@ -350,22 +351,22 @@ impl Tracker {
                                 let selected_project = self.projects[idx].clone();
                                 state.active_entry.project_id = selected_project.id;
                                 // TODO: continue with task selection
-                                state.mode = StartTrackingState::ReviewBeforeStart;
+                                state.mode = StartOrEditEntryState::ReviewBeforeStart;
                             }
-                            KeyCode::Esc => state.mode = StartTrackingState::ReviewBeforeStart,
+                            KeyCode::Esc => state.mode = StartOrEditEntryState::ReviewBeforeStart,
                             _ => (),
                         };
                         None
                     }
 
-                    StartTrackingState::TaskSelection => {
+                    StartOrEditEntryState::TaskSelection => {
                         if let KeyCode::Enter = key_event.code {
                             state.menu_list_state.select_next();
-                            state.mode = StartTrackingState::ReviewBeforeStart;
+                            state.mode = StartOrEditEntryState::ReviewBeforeStart;
                         }
                         None
                     }
-                    StartTrackingState::EnterDescription => match key_event.code {
+                    StartOrEditEntryState::EnterDescription => match key_event.code {
                         KeyCode::Char(c) => {
                             state.active_entry.description.push(c);
                             Some(TrackerAction::ConsumedKey)
@@ -375,12 +376,12 @@ impl Tracker {
                             None
                         }
                         KeyCode::Enter | KeyCode::Esc => {
-                            state.mode = StartTrackingState::ReviewBeforeStart;
+                            state.mode = StartOrEditEntryState::ReviewBeforeStart;
                             None
                         }
                         _ => None,
                     },
-                    StartTrackingState::ReviewBeforeStart => match key_event.code {
+                    StartOrEditEntryState::ReviewBeforeStart => match key_event.code {
                         KeyCode::Char('d') => {
                             let entry = state.active_entry.clone();
                             self.timer_mode = TimerMode::ShowActiveEntry(entry.clone());
@@ -395,7 +396,7 @@ impl Tracker {
                             None
                         }
                         KeyCode::Enter => {
-                            state.mode = StartTrackingState::from_usize(
+                            state.mode = StartOrEditEntryState::from_usize(
                                 state.menu_list_state.selected().unwrap_or(0),
                             )
                             .unwrap();
@@ -476,7 +477,7 @@ impl Tracker {
                 let task_name = create_input_list_item("select task...", None);
                 let desc = format_as_active_text_input(
                     &state.new_entry.description,
-                    matches!(state.mode, StartTrackingState::EnterDescription),
+                    matches!(state.mode, StartOrEditEntryState::EnterDescription),
                 );
 
                 let description = create_input_list_item("add description...", desc.into());
@@ -515,7 +516,7 @@ impl Tracker {
                 let task_name = create_input_list_item("select task...", None);
                 let desc = format_as_active_text_input(
                     &state.active_entry.description,
-                    matches!(state.mode, StartTrackingState::EnterDescription),
+                    matches!(state.mode, StartOrEditEntryState::EnterDescription),
                 );
 
                 let description = create_input_list_item("add description...", desc.into());
@@ -538,6 +539,44 @@ impl Tracker {
             .padding(Padding::horizontal(1));
         frame.render_widget(&block, area);
         let stats_area = block.inner(area);
+
+        let columns = [Constraint::Length(16), Constraint::Min(1)];
+        let [labels_area, values_area] = Layout::horizontal(columns).areas(stats_area);
+        let labels = Paragraph::new(vec![
+            Line::from("Total time:"),
+            Line::from("Sessions:"),
+            Line::from("Longest session:"),
+        ]);
+        frame.render_widget(labels, labels_area);
+
+        let mut today_session_count = self.todays_statistic.entries_count;
+        let active_session_time = match &self.timer_mode {
+            TimerMode::ShowActiveEntry(active_entry) => {
+                today_session_count += 1;
+                active_entry.end_time.unwrap_or(Timezone::now()) - active_entry.start_time
+            }
+            TimerMode::EditActiveEntry(state) => {
+                today_session_count += 1;
+                state.active_entry.end_time.unwrap_or(Timezone::now())
+                    - state.active_entry.start_time
+            }
+            _ => chrono::TimeDelta::zero(),
+        };
+
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::from(format_delta_time_statistic(
+                    self.todays_statistic.total_time + active_session_time,
+                )),
+                Line::from(today_session_count.to_string()),
+                Line::from(format_delta_time_statistic(std::cmp::max(
+                    self.todays_statistic.longest_session,
+                    active_session_time,
+                ))),
+            ])
+            .right_aligned(),
+            values_area,
+        );
     }
 
     pub fn get_keybind_hints(&self) -> &str {
@@ -547,13 +586,13 @@ impl Tracker {
                 "Navigate: ⇅  | Stop: s | Edit: e | Quit: q | Switch View: 1/2"
             }
             TimerMode::StartNewEntry(state) => match state.mode {
-                StartTrackingState::ProjectSelection => {
+                StartOrEditEntryState::ProjectSelection => {
                     "Navigate: ⇅  | Start: s | Quit: q | Switch View: 1/2"
                 }
-                StartTrackingState::TaskSelection => {
+                StartOrEditEntryState::TaskSelection => {
                     "Navigate: ⇅  | Start: s | Quit: q | Switch View: 1/2"
                 }
-                StartTrackingState::EnterDescription => "Submit: <enter>",
+                StartOrEditEntryState::EnterDescription => "Submit: <enter>",
                 ReviewBeforeStart => {
                     "Navigate: ⇅  | Start: s | Edit: e | Quit: q | Switch View: 1/2"
                 }
