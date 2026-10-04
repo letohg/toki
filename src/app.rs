@@ -20,6 +20,7 @@ use strum_macros::EnumIter;
 use crate::database;
 use crate::pages;
 use crate::pages::PageAction;
+use crate::pages::format_duration_verbose;
 use crate::theme;
 
 #[derive(Debug, PartialEq, EnumIter)]
@@ -39,6 +40,7 @@ pub struct App {
     db: database::Database,
     exit: bool,
     status: String,
+    current_tracker_state_info: String,
     active_page: Page,
     error_message: Option<String>,
 }
@@ -49,6 +51,7 @@ impl App {
             db: database::Database::new().unwrap(),
             exit: false,
             status: "Ready".to_string(),
+            current_tracker_state_info: String::new(),
             active_page: Page::Tracker(pages::tracker::Tracker::new()),
             error_message: None,
         };
@@ -68,12 +71,20 @@ impl App {
         let recent_entries = self.db.get_recent_entries(None, true).unwrap();
 
         let projects = self.db.get_projects().unwrap(); // TODO: handle failure case
-        let summary = self.db.get_metrics_summary().unwrap(); // TODO: handle failure case
+        let metrics = self.db.get_metrics_summary().unwrap(); // TODO: handle failure case
 
+        self.current_tracker_state_info = active_entry
+            .as_ref()
+            .map(|e| {
+                let name = projects
+                    .iter()
+                    .find(|p| p.id == e.project_id)
+                    .map_or(e.project_id.to_string(), |p| p.name.clone());
+                format!("{name} - {}", format_duration_verbose(&e.duration()))
+            })
+            .unwrap_or("idle".to_string());
         match &mut self.active_page {
-            Page::Tracker(page) => {
-                page.refresh(active_entry, recent_entries, projects, summary.today)
-            }
+            Page::Tracker(page) => page.refresh(active_entry, recent_entries, projects, metrics),
             Page::Projects(page) => page.refresh(projects),
             Page::Summary(page) => page.refresh(recent_entries, projects),
         }
@@ -200,7 +211,7 @@ impl App {
                         label,
                         Style::default()
                             .add_modifier(Modifier::BOLD)
-                            .fg(theme::SUBTEXT_0),
+                            .fg(theme::OVERLAY_0),
                     );
                 }
                 Span::styled(
@@ -217,16 +228,13 @@ impl App {
 
         frame.render_widget(Paragraph::new(Line::from(views)), tabs_area);
         frame.render_widget(
-            Paragraph::new(format!(
-                "● toki {} ",
-                pages::format_timestamp(&database::Timezone::now())
-            ))
-            .style(
-                Style::default()
-                    .add_modifier(Modifier::BOLD)
-                    .fg(theme::MAUVE),
-            )
-            .right_aligned(),
+            Paragraph::new(self.current_tracker_state_info.clone())
+                .style(
+                    Style::default()
+                        .add_modifier(Modifier::BOLD)
+                        .fg(theme::MAUVE),
+                )
+                .right_aligned(),
             appname_area,
         );
     }

@@ -106,7 +106,7 @@ pub struct Tracker {
     recent_entries: Vec<database::TimeEntry>,
     projects: Vec<database::Project>,
     timer_mode: TimerMode,
-    todays_statistic: database::DailyStats,
+    metrics: database::Metrics,
 }
 
 impl Tracker {
@@ -116,7 +116,7 @@ impl Tracker {
             recent_entries: Vec::new(),
             projects: Vec::new(),
             timer_mode: TimerMode::NoRunningEntry,
-            todays_statistic: database::DailyStats::default(),
+            metrics: database::Metrics::default(),
         }
     }
 
@@ -126,7 +126,7 @@ impl Tracker {
         recent_entries: Vec<database::TimeEntry>,
 
         projects: Vec<database::Project>,
-        todays_statistic: database::DailyStats,
+        metrics: database::Metrics,
     ) {
         if let Some(e) = active_entry {
             self.timer_mode = TimerMode::ShowActiveEntry(e);
@@ -134,7 +134,7 @@ impl Tracker {
 
         self.recent_entries = recent_entries;
         self.projects = projects;
-        self.todays_statistic = todays_statistic;
+        self.metrics = metrics;
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
@@ -167,16 +167,26 @@ impl Tracker {
 
     fn render_main_view(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let [tracker_stats_area, entries_area] =
-            Layout::vertical([Constraint::Length(6), Constraint::Min(3)]).areas(area);
+            Layout::vertical([Constraint::Length(8), Constraint::Min(3)]).areas(area);
 
-        let [tracker_area, _, today_stats_area] = Layout::horizontal([
-            Constraint::Percentage(50),
-            Constraint::Length(1),
-            Constraint::Percentage(50),
+        let metrics_max_width = ("in 10.000 sessions".len() + 4) as u16;
+        let [tracker_area, dm, wt] = Layout::horizontal([
+            Constraint::Min(40),
+            // Constraint::Length(1),
+            Constraint::Max(metrics_max_width),
+            Constraint::Max(metrics_max_width),
         ])
         .areas(tracker_stats_area);
+        let split = [Constraint::Percentage(50), Constraint::Percentage(50)];
+        let [d, m] = Layout::vertical(split).areas(dm);
+        let [w, t] = Layout::vertical(split).areas(wt);
+
         self.render_tracker(frame, tracker_area);
-        self.render_todays_stats(frame, today_stats_area);
+        self.render_metrics(frame, d, "Today", &self.metrics.today_metrics);
+        self.render_metrics(frame, w, "This Week", &self.metrics.week_metrics);
+        self.render_metrics(frame, m, "This Month", &self.metrics.month_metrics);
+        self.render_metrics(frame, t, "Total", &self.metrics.total_metrics);
+        // self.render_todays_stats(frame, today_stats_area);
         self.render_recent_entries(frame, entries_area);
     }
 
@@ -208,31 +218,38 @@ impl Tracker {
             let project_color = project.map_or(style::Color::Yellow, |p| {
                 style::Color::from_str(&p.color).unwrap_or_default()
             });
+            let row_fg_color = e.end_time.map_or(theme::GREEN, |_| theme::TEXT);
+            let row_bg_color = if i % 2 == 0 {
+                theme::SURFACE_0
+            } else {
+                theme::SURFACE_1
+            };
             Row::new(vec![
                 Cell::from(project.map_or("None".to_string(), |p| format!("• {}", p.name)))
                     .fg(project_color),
                 "-".into(),
-                Cell::from(e.description.clone()).fg(theme::TEXT),
-                Cell::from(e.start_time.format("%d-%b").to_string()).fg(theme::TEXT),
+                Cell::from(if e.description.is_empty() {
+                    "-".to_string()
+                } else {
+                    e.description.clone()
+                })
+                .fg(row_fg_color),
+                Cell::from(e.start_time.format("%d-%b").to_string()).fg(row_fg_color),
                 Cell::from(format!(
                     "{} - {}",
                     format_timestamp(&e.start_time),
                     e.end_time
                         .map_or("Running".to_owned(), |ts| format_timestamp(&ts))
                 ))
-                .fg(theme::TEXT),
+                .fg(row_fg_color),
                 Cell::from(format!(
                     "{:>8}",
                     delta_hms(&e.start_time, &e.end_time.unwrap_or(self.now))
                 ))
-                .fg(theme::TEXT),
+                .fg(row_fg_color),
             ])
             // TODO: better coloring
-            .style(style::Style::default().bg(if i % 2 == 0 {
-                theme::SURFACE_0
-            } else {
-                theme::SURFACE_1
-            }))
+            .style(style::Style::default().bg(row_bg_color))
         });
         let column_widths = vec![
             Constraint::Length(15),
@@ -513,7 +530,8 @@ impl Tracker {
                 let description = create_input_list_item("add description...", desc.into());
                 frame.render_stateful_widget(
                     List::new(vec![project_name, task_name, description])
-                        .highlight_style(Style::default().bg(theme::SUBTEXT_0))
+                        // .highlight_style(Style::default().bg(theme::SURFACE_0))
+                        .highlight_style(Style::default().fg(theme::LAVENDER).bold())
                         .highlight_symbol("› "),
                     values_area,
                     &mut state.menu_list_state,
@@ -566,6 +584,33 @@ impl Tracker {
         }
     }
 
+    fn render_metrics(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        title: &str,
+        metrics: &database::IntervalMetrics,
+    ) {
+        let block = Block::bordered()
+            .border_type(ratatui::widgets::BorderType::Rounded)
+            .border_style(theme::LAVENDER)
+            .title(format!(" {} ", title))
+            .padding(Padding::horizontal(1));
+        frame.render_widget(&block, area);
+        let area = block.inner(area);
+
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::from(format_duration_verbose(&metrics.total_time)),
+                Line::from(format!("in {} sessions", metrics.session_count))
+                    .italic()
+                    .fg(theme::OVERLAY_0),
+            ])
+            .right_aligned(),
+            area,
+        );
+    }
+
     fn render_todays_stats(&self, frame: &mut Frame<'_>, area: Rect) {
         let block = Block::bordered()
             .border_type(ratatui::widgets::BorderType::Rounded)
@@ -585,7 +630,7 @@ impl Tracker {
         frame.render_widget(labels, labels_area);
 
         let now = self.now;
-        let mut today_session_count = self.todays_statistic.entries_count;
+        let mut today_session_count = self.metrics.today.entries_count;
         let active_session_time = match &self.timer_mode {
             TimerMode::ShowActiveEntry(active_entry) => {
                 today_session_count += 1;
@@ -601,11 +646,11 @@ impl Tracker {
         frame.render_widget(
             Paragraph::new(vec![
                 Line::from(format_duration_verbose(
-                    &(self.todays_statistic.total_time + active_session_time),
+                    &(self.metrics.today.total_time + active_session_time),
                 )),
                 Line::from(today_session_count.to_string()),
                 Line::from(format_duration_verbose(&std::cmp::max(
-                    self.todays_statistic.longest_session,
+                    self.metrics.today.longest_session,
                     active_session_time,
                 ))),
             ])
@@ -721,8 +766,8 @@ fn create_input_list_item(placeholder: &str, content: Option<String>) -> ListIte
     ListItem::new(Line::from(vec![
         // "[ ".into(),
         match content {
-            None => Span::raw(placeholder).italic(),
-            Some(c) if c.is_empty() => Span::raw(placeholder).italic(),
+            None => Span::raw(placeholder).italic().fg(theme::OVERLAY_0),
+            Some(c) if c.is_empty() => Span::raw(placeholder).italic().fg(theme::OVERLAY_0),
             Some(c) => Span::raw(c),
         },
         // Span::raw(" ]"),
@@ -739,6 +784,7 @@ fn render_project_selection_list(
     frame.render_widget(Clear, centered_area);
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
+        .bg(theme::BASE)
         .padding(Padding::symmetric(1, 1))
         .title("Select Project");
     frame.render_widget(&block, centered_area);
@@ -747,7 +793,7 @@ fn render_project_selection_list(
         ListItem::new(p.name.as_str())
             .style(Style::new().fg(style::Color::from_str(&p.color).unwrap()))
     }))
-    .highlight_style(Style::default().bg(Color::DarkGray))
-    .highlight_symbol("> ");
+    .highlight_style(Style::default().bg(theme::SURFACE_0))
+    .highlight_symbol("› ");
     frame.render_stateful_widget(project_list, block.inner(centered_area), list_state);
 }

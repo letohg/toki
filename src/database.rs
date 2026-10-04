@@ -60,11 +60,14 @@ pub struct DailyStats {
     pub longest_session: chrono::TimeDelta,
 }
 
+#[derive(Default)]
 pub struct IntervalMetrics {
     pub total_time: chrono::TimeDelta,
     pub session_count: usize,
 }
-pub struct Summary {
+
+#[derive(Default)]
+pub struct Metrics {
     pub today: DailyStats,
     pub today_metrics: IntervalMetrics,
     pub week_metrics: IntervalMetrics,
@@ -257,7 +260,7 @@ impl Database {
     }
 
     // TODO Edge case, but unrealistic: handle tracking over midnight
-    pub fn get_metrics_summary(&self) -> rusqlite::Result<Summary> {
+    pub fn get_metrics_summary(&self) -> rusqlite::Result<Metrics> {
         let all_entries = self.get_recent_entries(None, false)?;
 
         // Helper days
@@ -278,10 +281,9 @@ impl Database {
         let this_month_entries = all_entries.iter().filter(|e| {
             e.start_time.year() == today.year() && e.start_time.month() == today.month()
         });
-        let this_week_entries = this_month_entries.clone().filter(|e| {
-            this_week_first_day.day() <= e.start_time.day()
-                && e.start_time.day() <= this_week_last_day.day()
-        });
+        let this_week_entries = all_entries
+            .iter()
+            .filter(|e| this_week_first_day <= e.start_time && e.start_time <= this_week_last_day);
         let today_entries = this_week_entries
             .clone()
             .filter(|e| today.day() == e.start_time.day());
@@ -336,7 +338,7 @@ impl Database {
             session_count: all_entries.len(),
         };
 
-        Ok(Summary {
+        Ok(Metrics {
             today: today_stats,
             today_metrics,
             week_metrics,
