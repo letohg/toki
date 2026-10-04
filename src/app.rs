@@ -40,7 +40,7 @@ pub struct App {
     db: database::Database,
     exit: bool,
     status: String,
-    current_tracker_state_info: String,
+    current_tracker_state_info: Option<(String, chrono::Duration)>,
     active_page: Page,
     error_message: Option<String>,
 }
@@ -51,7 +51,7 @@ impl App {
             db: database::Database::new().unwrap(),
             exit: false,
             status: "Ready".to_string(),
-            current_tracker_state_info: String::new(),
+            current_tracker_state_info: None,
             active_page: Page::Tracker(pages::tracker::Tracker::new()),
             error_message: None,
         };
@@ -73,16 +73,13 @@ impl App {
         let projects = self.db.get_projects().unwrap(); // TODO: handle failure case
         let metrics = self.db.get_metrics_summary().unwrap(); // TODO: handle failure case
 
-        self.current_tracker_state_info = active_entry
-            .as_ref()
-            .map(|e| {
-                let name = projects
-                    .iter()
-                    .find(|p| p.id == e.project_id)
-                    .map_or(e.project_id.to_string(), |p| p.name.clone());
-                format!("{name} - {}", format_duration_verbose(&e.duration()))
-            })
-            .unwrap_or("idle".to_string());
+        self.current_tracker_state_info = active_entry.as_ref().map(|e| {
+            let name = projects
+                .iter()
+                .find(|p| p.id == e.project_id)
+                .map_or(e.project_id.to_string(), |p| p.name.clone());
+            (name, e.duration())
+        });
         match &mut self.active_page {
             Page::Tracker(page) => page.refresh(active_entry, recent_entries, projects, metrics),
             Page::Projects(page) => page.refresh(projects),
@@ -113,6 +110,8 @@ impl App {
         //         Line::from("SURFACE_1").fg(theme::SURFACE_1),
         //         Line::from("SURFACE_0").fg(theme::SURFACE_0),
         //         Line::from("BASE").fg(theme::BASE),
+        //         Line::from("MANTLE").fg(theme::MANTLE),
+        //         Line::from("CRUST").fg(theme::CRUST),
         //     ]),
         //     frame.area(),
         // );
@@ -120,7 +119,7 @@ impl App {
 
         let window = Block::bordered()
             .border_type(ratatui::widgets::BorderType::Rounded)
-            .padding(Padding::horizontal(1))
+            .padding(Padding::symmetric(3, 1))
             .title(" Toki • TimeTracker ")
             .bg(theme::BASE)
             .title_alignment(HorizontalAlignment::Center);
@@ -132,12 +131,17 @@ impl App {
             Constraint::Length(2),
         ])
         .areas(window.inner(area));
+        let navbar_block = Block::bordered()
+            .borders(Borders::BOTTOM)
+            .merge_borders(symbols::merge::MergeStrategy::Exact)
+            .style(theme::LAVENDER);
 
         let footer_block = Block::bordered()
             .borders(Borders::TOP)
             .merge_borders(symbols::merge::MergeStrategy::Exact)
             .style(theme::LAVENDER);
-        self.render_navbar(frame, top);
+        frame.render_widget(&navbar_block, top);
+        self.render_navbar(frame, navbar_block.inner(top));
         self.render_page(frame, middle);
         frame.render_widget(&footer_block, bottom);
         self.render_footer(frame, footer_block.inner(bottom));
@@ -176,7 +180,7 @@ impl App {
             Page::Summary(_) => "Select: ⇅  | Quit: q",
         };
         let [status_area, navigation_area] =
-            Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(90)])
+            Layout::horizontal([Constraint::Percentage(25), Constraint::Percentage(75)])
                 .areas(area);
         frame.render_widget(
             Paragraph::new(Line::from(self.status.as_str()))
@@ -194,7 +198,7 @@ impl App {
 
     fn render_navbar(&self, frame: &mut Frame, area: Rect) {
         let [tabs_area, appname_area] =
-            Layout::horizontal([Constraint::Min(25), Constraint::Length(13)]).areas(area);
+            Layout::horizontal([Constraint::Min(25), Constraint::Min(25)]).areas(area);
 
         let views: Vec<Span> = View::iter()
             .enumerate()
@@ -228,13 +232,18 @@ impl App {
 
         frame.render_widget(Paragraph::new(Line::from(views)), tabs_area);
         frame.render_widget(
-            Paragraph::new(self.current_tracker_state_info.clone())
-                .style(
-                    Style::default()
-                        .add_modifier(Modifier::BOLD)
-                        .fg(theme::MAUVE),
-                )
-                .right_aligned(),
+            Paragraph::new(self.current_tracker_state_info.as_ref().map_or(
+                Line::from("  idle").fg(theme::GREEN),
+                |(p, d)| {
+                    Line::from(vec![
+                        Span::from(" ").fg(theme::RED),
+                        Span::from(format!("{p} - {}", format_duration_verbose(d)))
+                            .bold()
+                            .fg(theme::TEXT),
+                    ])
+                },
+            ))
+            .right_aligned(),
             appname_area,
         );
     }

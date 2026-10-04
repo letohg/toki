@@ -204,6 +204,7 @@ impl Tracker {
         );
         let table_block = Block::new()
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
             .border_style(theme::OVERLAY_0);
         frame.render_widget(&table_block, entries_area);
         let table_area = table_block.inner(entries_area);
@@ -220,9 +221,9 @@ impl Tracker {
             });
             let row_fg_color = e.end_time.map_or(theme::GREEN, |_| theme::TEXT);
             let row_bg_color = if i % 2 == 0 {
-                theme::SURFACE_0
+                theme::BASE
             } else {
-                theme::SURFACE_1
+                theme::SURFACE_0
             };
             Row::new(vec![
                 Cell::from(project.map_or("None".to_string(), |p| format!("• {}", p.name)))
@@ -346,7 +347,7 @@ impl Tracker {
                             state.menu_list_state.select_next();
                             Some(TrackerAction::ConsumedKey)
                         }
-                        KeyCode::Char('s') if state.new_entry.project.is_some() => {
+                        KeyCode::Char(' ') if state.new_entry.project.is_some() => {
                             let start_tracking_action = StartTracking {
                                 project_id: state.new_entry.project.as_ref().unwrap().id,
                                 description: state.new_entry.description.clone(),
@@ -462,7 +463,7 @@ impl Tracker {
 
         let columns = [Constraint::Length(14), Constraint::Min(1)];
         let [time_area, info_area] =
-            Layout::vertical([Constraint::Length(1), Constraint::Length(3)]).areas(tracker_area);
+            Layout::vertical([Constraint::Length(1), Constraint::Length(6)]).areas(tracker_area);
         let [labels_area, values_area] = Layout::horizontal(columns).areas(info_area);
 
         match &mut self.timer_mode {
@@ -511,9 +512,9 @@ impl Tracker {
                 frame.render_widget(block, area);
 
                 let labels = List::new(vec![
-                    Line::from("Project:"),
-                    Line::from("Task:"),
-                    Line::from("Description:"),
+                    Line::from("Project     :"),
+                    Line::from("Task        :"),
+                    Line::from("Description :"),
                 ]);
                 frame.render_stateful_widget(labels, labels_area, &mut state.menu_list_state);
 
@@ -545,10 +546,10 @@ impl Tracker {
                 frame.render_widget(block, area);
 
                 let labels = List::new(vec![
-                    Line::from("Project:"),
-                    Line::from("Task:"),
-                    Line::from("Description:"),
-                    Line::from("Start Time:"),
+                    Line::from("Project     :"),
+                    Line::from("Task        :"),
+                    Line::from("Description :"),
+                    Line::from("Start Time  :"),
                 ]);
                 frame.render_stateful_widget(labels, labels_area, &mut state.menu_list_state);
 
@@ -660,26 +661,23 @@ impl Tracker {
     }
 
     pub fn get_keybind_hints(&self) -> &str {
+        // TODO:
+        // vec![
+        //     ("Start", 's')
+        //     ("Quit", 'q')
+        // ];
         match &self.timer_mode {
-            TimerMode::NoRunningEntry => "Navigate: ⇅  | Start: s | Quit: q | Switch View: 1/2",
-            TimerMode::ShowActiveEntry(_) => {
-                "Navigate: ⇅  | Stop: s | Edit: e | Quit: q | Switch View: 1/2"
-            }
+            TimerMode::NoRunningEntry => "Select: ⇅  | Start: s | Quit: q",
+            TimerMode::ShowActiveEntry(_) => "Select: ⇅  | Stop: s | Edit: e | Quit: q",
             TimerMode::StartNewEntry(state) => match state.mode {
                 StartOrEditEntryState::ProjectSelection => {
-                    "Navigate: ⇅  | Start: s | Quit: q | Switch View: 1/2"
+                    "Select: ⇅  | Choose: <enter> | Cancle <esc> | Quit: q"
                 }
-                StartOrEditEntryState::TaskSelection => {
-                    "Navigate: ⇅  | Start: s | Quit: q | Switch View: 1/2"
-                }
+                StartOrEditEntryState::TaskSelection => "Select: ⇅  | Quit: q",
                 StartOrEditEntryState::EnterDescription => "Submit: <enter>",
-                ReviewBeforeStart => {
-                    "Navigate: ⇅  | Start: s | Edit: e | Quit: q | Switch View: 1/2"
-                }
+                ReviewBeforeStart => "Select: ⇅  | Start: <space> | Canlce: <esc> | Quit: q",
             },
-            TimerMode::EditActiveEntry(_) => {
-                "Navigate: ⇅  | Start/Stop: s | Edit: e | Quit: q | Switch View: 1/2"
-            }
+            TimerMode::EditActiveEntry(_) => "Select: ⇅  | Done: d | Cancle: <esc> | Quit: q",
         }
     }
 }
@@ -699,46 +697,15 @@ fn render_active_tracker_info_value(
     );
 
     let labels = Paragraph::new(vec![
-        Line::from("Project:"),
-        Line::from("Task:"),
-        Line::from("Description:"),
+        Line::from("Project     :"),
+        Line::from("Task        :"),
+        Line::from("Description :"),
     ]);
     frame.render_widget(labels, labels_area);
 
     let project_name = Line::from(info.project_name).style(info.project_color);
     let task_name = Line::from(info.task);
     let description = Line::from(info.description);
-    frame.render_widget(
-        Paragraph::new(vec![project_name, task_name, description]),
-        values_area,
-    );
-}
-
-fn render_active_tracker_info(
-    frame: &mut Frame<'_>,
-    info: Option<TrackingInfo>,
-    time_area: Rect,
-    labels_area: Rect,
-    values_area: Rect,
-) {
-    frame.render_widget(
-        Paragraph::new(info.as_ref().map_or_default(|i| i.duration.clone()))
-            .style(style::Color::Green)
-            .centered(),
-        time_area,
-    );
-
-    let labels = Paragraph::new(vec![
-        Line::from("Project:"),
-        Line::from("Task:"),
-        Line::from("Description:"),
-    ]);
-    frame.render_widget(labels, labels_area);
-
-    let project_name = Line::from(info.as_ref().map_or_default(|i| i.project_name.clone()))
-        .style(info.as_ref().map_or_default(|i| i.project_color));
-    let task_name = Line::from(info.as_ref().map_or_default(|i| i.task.clone()));
-    let description = Line::from(info.as_ref().map_or_default(|i| i.description.clone()));
     frame.render_widget(
         Paragraph::new(vec![project_name, task_name, description]),
         values_area,
