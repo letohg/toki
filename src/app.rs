@@ -21,7 +21,7 @@ use crate::database;
 use crate::database::Timezone;
 use crate::pages;
 use crate::pages::PageAction;
-use crate::pages::format_duration_verbose;
+use crate::pages::format_duration_hms_verbose;
 use crate::theme;
 
 #[derive(Debug, PartialEq, EnumIter)]
@@ -87,7 +87,7 @@ impl App {
         match &mut self.active_page {
             Page::Tracker(page) => page.refresh(active_entry, recent_entries, projects, metrics),
             Page::Projects(page) => page.refresh(projects),
-            Page::Summary(page) => page.refresh(recent_entries, projects),
+            Page::Summary(page) => page.refresh(recent_entries, projects, metrics),
         }
     }
 
@@ -241,7 +241,7 @@ impl App {
                 |(p, d)| {
                     Line::from(vec![
                         Span::from(" ").fg(theme::RED),
-                        Span::from(format!("{p} - {}", format_duration_verbose(d)))
+                        Span::from(format!("{p} - {}", format_duration_hms_verbose(d)))
                             .bold()
                             .fg(theme::TEXT),
                     ])

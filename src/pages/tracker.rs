@@ -19,7 +19,7 @@ use crate::database::{self, EntityId, TimeEntry, Timestamp, Timezone};
 use crate::pages::delta_hms;
 use crate::pages::tracker::StartOrEditEntryState::ReviewBeforeStart;
 use crate::pages::tracker::TrackerAction::StartTracking;
-use crate::pages::{PageAction, format_duration_verbose, format_timestamp};
+use crate::pages::{PageAction, format_duration_hms_verbose, format_timestamp};
 use crate::theme;
 
 #[derive(Clone, FromPrimitive)]
@@ -602,7 +602,7 @@ impl Tracker {
 
         frame.render_widget(
             Paragraph::new(vec![
-                Line::from(format_duration_verbose(&metrics.total_time)),
+                Line::from(format_duration_hms_verbose(&metrics.total_time)),
                 Line::from(format!("in {} sessions", metrics.session_count))
                     .italic()
                     .fg(theme::OVERLAY_0),
@@ -646,11 +646,11 @@ impl Tracker {
 
         frame.render_widget(
             Paragraph::new(vec![
-                Line::from(format_duration_verbose(
+                Line::from(format_duration_hms_verbose(
                     &(self.metrics.today.total_time + active_session_time),
                 )),
                 Line::from(today_session_count.to_string()),
-                Line::from(format_duration_verbose(&std::cmp::max(
+                Line::from(format_duration_hms_verbose(&std::cmp::max(
                     self.metrics.today.longest_session,
                     active_session_time,
                 ))),

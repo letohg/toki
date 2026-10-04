@@ -12,9 +12,10 @@ use ratatui::{Frame, layout::Rect};
 use ratatui::{layout::Constraint, style::Style};
 use std::collections::HashMap;
 use std::str::FromStr;
+use tui_barchart_ext::bar_symbols::{HALF, HORIZONTAL_HALF};
 
 use crate::database::{self, Timezone};
-use crate::pages::format_duration_verbose;
+use crate::pages::{format_duration_hm_verbose, format_duration_hms_verbose};
 use crate::theme;
 
 pub struct Summary {
@@ -32,9 +33,15 @@ impl Summary {
         }
     }
 
-    pub fn refresh(&mut self, entries: Vec<database::TimeEntry>, projects: Vec<database::Project>) {
+    pub fn refresh(
+        &mut self,
+        entries: Vec<database::TimeEntry>,
+        projects: Vec<database::Project>,
+        metrics: database::Metrics,
+    ) {
         self.entries = entries;
         self.projects = projects;
+        self.metrics = metrics
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect) {
@@ -62,9 +69,10 @@ impl Summary {
 
         let details_block = Block::bordered()
             .border_type(BorderType::Rounded)
+            .padding(Padding::horizontal(1))
             .title(" Details ");
 
-        let montly_time_per_project = self
+        let monthly_time_per_project = self
             .entries
             .iter()
             .filter(|e| e.start_time.year() == year && e.start_time.month() == month)
@@ -83,45 +91,77 @@ impl Summary {
 
         let column_widths = [Constraint::Length(25), Constraint::Length(13)];
         let details_table = Table::new(
-            montly_time_per_project.iter().map(|(p, h)| {
+            monthly_time_per_project.iter().map(|(p, h)| {
                 Row::new([
                     Cell::from(p.name.clone())
                         .style(style::Color::from_str(&p.color).unwrap_or_default()),
-                    Cell::from(Span::from(format_duration_verbose(h)).into_right_aligned_line()),
+                    Cell::from(
+                        Span::from(format_duration_hms_verbose(h)).into_right_aligned_line(),
+                    ),
                 ])
             }),
             column_widths,
         );
-        let bars = montly_time_per_project
+        let bars = monthly_time_per_project
             .iter()
             .map(|(p, h)| {
-                Bar::with_label(p.name.clone(), h.num_hours() as u64)
+                tui_barchart_ext::barchart::Bar::with_label(p.name.clone(), h.num_hours() as u64)
                     .text_value("")
                     .style(style::Color::from_str(&p.color).unwrap_or_default())
             })
-            .collect::<Vec<Bar>>();
+            .collect::<Vec<tui_barchart_ext::barchart::Bar>>();
 
         let details_area = details_block.inner(stats_area);
-        let project_times_chart = ratatui::widgets::BarChart::new(bars)
-            .block(details_block.clone())
+        const HORIZONTAL_HALF_BAR: tui_barchart_ext::bar_symbols::Set =
+            tui_barchart_ext::bar_symbols::Set {
+                full: HALF,
+                seven_eighths: HALF,
+                three_quarters: HALF,
+                five_eighths: HALF,
+                half: HALF,
+                three_eighths: HALF,
+                one_quarter: HALF,
+                one_eighth: HALF,
+                empty: " ",
+            };
+        let monthly_total = self.metrics.month_metrics.total_time;
+        let [chart_area, numbers_area] =
+            Layout::horizontal([Constraint::Min(0), Constraint::Length(16)])
+                .areas(details_block.inner(details_area));
+        let project_times_chart = tui_barchart_ext::barchart::BarChart::new(bars)
             .direction(ratatui::layout::Direction::Horizontal)
             .bar_width(1)
+            .bar_set(HORIZONTAL_HALF_BAR)
             .bar_gap(0)
             .bar_style(Style::new().light_blue())
-            .max((40.0 * 4.5) as u64)
+            .max(monthly_total.num_hours() as u64)
             .value_style(Style::new().italic().bold())
             .label_style(Style::new().white());
-        frame.render_widget(project_times_chart, details_area);
+        frame.render_widget(project_times_chart, chart_area);
         frame.render_widget(
             Paragraph::new(
-                montly_time_per_project
+                monthly_time_per_project
                     .iter()
-                    .map(|(p, h)| Span::from(format_duration_verbose(h)).into_right_aligned_line())
-                    // .intersperse(Line::from(""))
+                    .map(|(p, h)| {
+                        Line::from(vec![
+                            Span::from(format_duration_hm_verbose(h)),
+                            Span::from(format!(
+                                "  {:.1}%",
+                                if monthly_total == chrono::Duration::zero() {
+                                    0.0
+                                } else {
+                                    100.0 * h.num_seconds() as f64
+                                        / monthly_total.num_seconds() as f64
+                                }
+                            ))
+                            .fg(theme::GREEN),
+                        ])
+                        .right_aligned()
+                    })
                     .collect::<Vec<Line>>(),
-            )
-            .block(details_block),
-            details_area,
+            ),
+            // .block(details_block),
+            numbers_area,
         );
         // frame.render_widget(details_table, details_area);
     }
@@ -222,22 +262,30 @@ impl Summary {
                 let is_weekday = weekday.num_days_from_monday() < 5;
 
                 if time == 0 && !is_weekday {
-                    return widgets::Bar::with_label(Line::from("..").fg(weekday_color), 0)
-                        .text_value("");
+                    return tui_barchart_ext::barchart::Bar::with_label(
+                        Line::from("..").fg(weekday_color),
+                        0,
+                    )
+                    .text_value("");
                     // return Some(widgets::Bar::with_label("..".to_string(), 0).text_value(""));
                 }
                 let dominat_projects_color = dominant_project_per_day
                     .get(&d)
                     .map_or(style::Color::White, |c| *c);
-                widgets::Bar::with_label(Line::from(d.to_string()).fg(weekday_color), time)
-                    .text_value("")
-                    .style(dominat_projects_color)
+                tui_barchart_ext::barchart::Bar::with_label(
+                    Line::from(d.to_string()).fg(weekday_color),
+                    time,
+                )
+                .text_value("")
+                .style(dominat_projects_color)
             })
             .dedup()
             // .intersperse(widgets::Bar::with_label("..".to_string(), 0).text_value(""))
-            .collect::<Vec<widgets::Bar<'_>>>();
+            .collect::<Vec<tui_barchart_ext::barchart::Bar<'_>>>();
         let charts_inner_area = bar_chart_block.inner(chart_area);
-        let summary_chart = ratatui::widgets::BarChart::new(bars)
+
+        let summary_chart = tui_barchart_ext::barchart::BarChart::vertical(bars)
+            .bar_width(1)
             .block(bar_chart_block)
             .bar_width(2)
             // .bar_gap(

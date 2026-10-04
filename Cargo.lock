@@ -1786,6 +1786,7 @@ dependencies = [
  "rusqlite",
  "strum",
  "strum_macros",
+ "tui-barchart-ext",
 ]
 
 [[package]]
@@ -1827,6 +1828,17 @@ dependencies = [
  "sharded-slab",
  "thread_local",
  "tracing-core",
+]
+
+[[package]]
+name = "tui-barchart-ext"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f27349a1774d78a8216b7938e3198444921640fca2befec7d86c7cf05f907d4"
+dependencies = [
+ "ratatui-core",
+ "ratatui-widgets",
+ "unicode-width",
 ]
 
 [[package]]
