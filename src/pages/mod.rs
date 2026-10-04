@@ -16,10 +16,10 @@ pub enum PageAction {
 
 pub fn delta_hms(start: &Timestamp, end: &Timestamp) -> String {
     let delta: chrono::TimeDelta = *end - *start;
-    format_delta_time(delta)
+    format_duration_clock(delta)
 }
 
-pub fn format_delta_time(delta: chrono::TimeDelta) -> String {
+pub fn format_duration_clock(delta: chrono::TimeDelta) -> String {
     let h = delta.num_hours();
     let m = delta.num_minutes() % 60;
     let s = delta.num_seconds() % 60;
@@ -29,7 +29,7 @@ pub fn format_delta_time(delta: chrono::TimeDelta) -> String {
     format!("{:02}:{:02}", m, s)
 }
 
-pub fn format_delta_time_statistic(delta: &chrono::TimeDelta) -> String {
+pub fn format_duration_verbose(delta: &chrono::TimeDelta) -> String {
     let h = delta.num_hours();
     let m = delta.num_minutes() % 60;
     let s = delta.num_seconds() % 60;

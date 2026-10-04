@@ -38,6 +38,7 @@ pub enum Page {
 pub struct App {
     db: database::Database,
     exit: bool,
+    status: String,
     active_page: Page,
     error_message: Option<String>,
 }
@@ -47,6 +48,7 @@ impl App {
         let mut app = Self {
             db: database::Database::new().unwrap(),
             exit: false,
+            status: "Ready".to_string(),
             active_page: Page::Tracker(pages::tracker::Tracker::new()),
             error_message: None,
         };
@@ -78,10 +80,38 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
+        // frame.render_widget(
+        //     Paragraph::new(vec![
+        //         Line::from("ROSEWATER").fg(theme::ROSEWATER),
+        //         Line::from("MAUVE").fg(theme::MAUVE),
+        //         Line::from("RED").fg(theme::RED),
+        //         Line::from("PEACH").fg(theme::PEACH),
+        //         Line::from("YELLOW").fg(theme::YELLOW),
+        //         Line::from("GREEN").fg(theme::GREEN),
+        //         Line::from("TEAL").fg(theme::TEAL),
+        //         Line::from("SKY").fg(theme::SKY),
+        //         Line::from("BLUE").fg(theme::BLUE),
+        //         Line::from("LAVENDER").fg(theme::LAVENDER),
+        //         Line::from("TEXT").fg(theme::TEXT),
+        //         Line::from("SUBTEXT_1").fg(theme::SUBTEXT_1),
+        //         Line::from("SUBTEXT_0").fg(theme::SUBTEXT_0),
+        //         Line::from("OVERLAY_2").fg(theme::OVERLAY_2),
+        //         Line::from("OVERLAY_1").fg(theme::OVERLAY_1),
+        //         Line::from("OVERLAY_0").fg(theme::OVERLAY_0),
+        //         Line::from("SURFACE_2").fg(theme::SURFACE_2),
+        //         Line::from("SURFACE_1").fg(theme::SURFACE_1),
+        //         Line::from("SURFACE_0").fg(theme::SURFACE_0),
+        //         Line::from("BASE").fg(theme::BASE),
+        //     ]),
+        //     frame.area(),
+        // );
+        // return;
+
         let window = Block::bordered()
             .border_type(ratatui::widgets::BorderType::Rounded)
             .padding(Padding::horizontal(1))
-            .title("Toki")
+            .title(" Toki • TimeTracker ")
+            .bg(theme::BASE)
             .title_alignment(HorizontalAlignment::Center);
         let area = frame.area();
         frame.render_widget(&window, area);
@@ -92,9 +122,14 @@ impl App {
         ])
         .areas(window.inner(area));
 
+        let footer_block = Block::bordered()
+            .borders(Borders::TOP)
+            .merge_borders(symbols::merge::MergeStrategy::Exact)
+            .style(theme::LAVENDER);
         self.render_navbar(frame, top);
         self.render_page(frame, middle);
-        self.render_keybind_hints(frame, bottom);
+        frame.render_widget(&footer_block, bottom);
+        self.render_footer(frame, footer_block.inner(bottom));
         self.render_popup(frame, window.inner(area));
     }
 
@@ -123,16 +158,27 @@ impl App {
         }
     }
 
-    fn render_keybind_hints(&self, frame: &mut Frame, area: Rect) {
-        // TODO: move into page render logic
+    fn render_footer(&self, frame: &mut Frame, area: Rect) {
         let keybinds = match &self.active_page {
             Page::Tracker(p) => p.get_keybind_hints(),
-            Page::Projects(_) => "Navigate: ⇅  | Quit: q | Switch View: 1-3",
-            Page::Summary(_) => "Navigate: ⇅  | Quit: q | Switch View: 1-3",
+            Page::Projects(_) => "Select: ⇅  | Quit: q",
+            Page::Summary(_) => "Select: ⇅  | Quit: q",
         };
-        let [_, bottom] = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(area);
-        let footer = Paragraph::new(keybinds);
-        frame.render_widget(footer, bottom);
+        let [status_area, navigation_area] =
+            Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(90)])
+                .areas(area);
+        frame.render_widget(
+            Paragraph::new(Line::from(self.status.as_str()))
+                .left_aligned()
+                .fg(theme::PEACH),
+            status_area,
+        );
+        frame.render_widget(
+            Paragraph::new(keybinds)
+                .right_aligned()
+                .fg(theme::OVERLAY_0),
+            navigation_area,
+        );
     }
 
     fn render_navbar(&self, frame: &mut Frame, area: Rect) {
@@ -150,11 +196,18 @@ impl App {
                 );
                 let label = format!("[{}] {:?}", i + 1, view);
                 if !is_active {
-                    return label.into();
+                    return Span::styled(
+                        label,
+                        Style::default()
+                            .add_modifier(Modifier::BOLD)
+                            .fg(theme::SUBTEXT_0),
+                    );
                 }
                 Span::styled(
                     label,
-                    Style::default().add_modifier(Modifier::BOLD).light_yellow(),
+                    Style::default()
+                        .add_modifier(Modifier::BOLD)
+                        .fg(theme::GREEN),
                 )
             })
             .collect::<Vec<Span>>()
@@ -255,16 +308,19 @@ impl App {
                     task_id,
                 } => {
                     let _ = self.db.start_entry(project_id, description, task_id);
+                    self.status = "Timer started".to_string();
                     self.update_state();
                     true
                 }
                 pages::tracker::TrackerAction::UpdateEntry(entry) => {
                     self.db.update_entry(entry)?;
+                    self.status = "Timer updated".to_string();
                     self.update_state();
                     true
                 }
                 pages::tracker::TrackerAction::StopTracking { entry_id } => {
                     let _ = self.db.stop_entry(entry_id);
+                    self.status = "Timer stopped".to_string();
                     self.update_state();
                     true
                 }

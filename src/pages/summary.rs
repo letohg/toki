@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use crate::database::{self, Timezone};
-use crate::pages::format_delta_time_statistic;
+use crate::pages::format_duration_verbose;
 
 pub struct Summary {
     entries: Vec<database::TimeEntry>,
@@ -77,9 +77,7 @@ impl Summary {
                 Row::new([
                     Cell::from(p.name.clone())
                         .style(style::Color::from_str(&p.color).unwrap_or_default()),
-                    Cell::from(
-                        Span::from(format_delta_time_statistic(h)).into_right_aligned_line(),
-                    ),
+                    Cell::from(Span::from(format_duration_verbose(h)).into_right_aligned_line()),
                 ])
             }),
             column_widths,
@@ -98,6 +96,7 @@ impl Summary {
             .block(details_block.clone())
             .direction(ratatui::layout::Direction::Horizontal)
             .bar_width(1)
+            .bar_gap(0)
             .bar_style(Style::new().light_blue())
             .max((40.0 * 4.5) as u64)
             .value_style(Style::new().italic().bold())
@@ -107,10 +106,8 @@ impl Summary {
             Paragraph::new(
                 montly_time_per_project
                     .iter()
-                    .map(|(p, h)| {
-                        Span::from(format_delta_time_statistic(h)).into_right_aligned_line()
-                    })
-                    .intersperse(Line::from(""))
+                    .map(|(p, h)| Span::from(format_duration_verbose(h)).into_right_aligned_line())
+                    // .intersperse(Line::from(""))
                     .collect::<Vec<Line>>(),
             )
             .block(details_block),

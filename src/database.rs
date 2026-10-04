@@ -47,6 +47,12 @@ pub struct TimeEntry {
     pub created_at: Timestamp,
 }
 
+impl TimeEntry {
+    pub fn duration(&self) -> chrono::Duration {
+        self.end_time.unwrap_or(Timezone::now()) - self.start_time
+    }
+}
+
 #[derive(Default)]
 pub struct DailyStats {
     pub entries_count: usize,

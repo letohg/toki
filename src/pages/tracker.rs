@@ -1,3 +1,4 @@
+use chrono::Datelike;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 
@@ -18,7 +19,8 @@ use crate::database::{self, EntityId, TimeEntry, Timestamp, Timezone};
 use crate::pages::delta_hms;
 use crate::pages::tracker::StartOrEditEntryState::ReviewBeforeStart;
 use crate::pages::tracker::TrackerAction::StartTracking;
-use crate::pages::{PageAction, format_delta_time_statistic, format_timestamp};
+use crate::pages::{PageAction, format_duration_verbose, format_timestamp};
+use crate::theme;
 
 #[derive(Clone, FromPrimitive)]
 enum StartOrEditEntryState {
@@ -179,18 +181,27 @@ impl Tracker {
     }
 
     fn render_recent_entries(&self, frame: &mut Frame<'_>, area: Rect) {
-        let block = Block::new().padding(Padding::symmetric(1, 1));
+        let block = Block::new(); //.padding(Padding::symmetric(1, 1));
         let [title_area, entries_area] =
             Layout::vertical([Constraint::Length(1), Constraint::Min(3)]).areas(block.inner(area));
-        frame.render_widget(Paragraph::new("RECENT ENTRIES"), title_area);
-        let table_block = Block::new().borders(Borders::TOP);
+        let today = Timezone::now();
+        frame.render_widget(
+            Paragraph::new(format!(
+                " RECENT ENTRIES · {}",
+                today.format("%A, %d %B %Y")
+            )),
+            title_area,
+        );
+        let table_block = Block::new()
+            .borders(Borders::ALL)
+            .border_style(theme::OVERLAY_0);
         frame.render_widget(&table_block, entries_area);
         let table_area = table_block.inner(entries_area);
 
         let headings = Row::new(
-            ["Project", "Task", "Description", "Day", "Time", "Total"]
+            ["Name", "Task", "Description", "Day", "Time", "Total"]
                 .into_iter()
-                .map(|t| Cell::from(t).bold()),
+                .map(|t| Cell::from(t).bold().fg(theme::ROSEWATER)),
         );
         let rows = self.recent_entries.iter().enumerate().map(|(i, e)| {
             let project = self.projects.iter().find(|p| p.id == e.project_id);
@@ -199,26 +210,28 @@ impl Tracker {
             });
             Row::new(vec![
                 Cell::from(project.map_or("None".to_string(), |p| format!("• {}", p.name)))
-                    .style(style::Style::new().fg(project_color)),
+                    .fg(project_color),
                 "-".into(),
-                Cell::from(e.description.clone()),
-                Cell::from(e.start_time.date_naive().to_string()),
+                Cell::from(e.description.clone()).fg(theme::TEXT),
+                Cell::from(e.start_time.format("%d-%b").to_string()).fg(theme::TEXT),
                 Cell::from(format!(
                     "{} - {}",
                     format_timestamp(&e.start_time),
                     e.end_time
                         .map_or("Running".to_owned(), |ts| format_timestamp(&ts))
-                )),
+                ))
+                .fg(theme::TEXT),
                 Cell::from(format!(
                     "{:>8}",
                     delta_hms(&e.start_time, &e.end_time.unwrap_or(self.now))
-                )),
+                ))
+                .fg(theme::TEXT),
             ])
             // TODO: better coloring
             .style(style::Style::default().bg(if i % 2 == 0 {
-                Color::DarkGray
+                theme::SURFACE_0
             } else {
-                Color::default()
+                theme::SURFACE_1
             }))
         });
         let column_widths = vec![
@@ -437,12 +450,18 @@ impl Tracker {
 
         match &mut self.timer_mode {
             TimerMode::NoRunningEntry => {
-                let block = block.title(" READY ");
+                let block = block
+                    .title(" READY ")
+                    .title_style(theme::GREEN)
+                    .border_style(theme::GREEN);
                 frame.render_widget(block, area);
                 render_no_active_tracker(frame, tracker_area);
             }
             TimerMode::ShowActiveEntry(entry) => {
-                let block = block.title(" RUNNING ");
+                let block = block
+                    .title(" RUNNING ")
+                    .title_style(theme::MAROON)
+                    .border_style(theme::MAROON);
                 frame.render_widget(block, area);
                 let project = self.projects.iter().find(|p| p.id == entry.project_id);
                 let project_color = project.map_or(style::Color::Yellow, |p| {
@@ -468,7 +487,10 @@ impl Tracker {
                 );
             }
             TimerMode::StartNewEntry(state) => {
-                let block = block.title(" STARTING TRACKER ");
+                let block = block
+                    .title(" STARTING TRACKER ")
+                    .title_style(theme::YELLOW)
+                    .border_style(theme::YELLOW);
                 frame.render_widget(block, area);
 
                 let labels = List::new(vec![
@@ -482,7 +504,7 @@ impl Tracker {
                     "select project...",
                     state.new_entry.project.as_ref().map(|p| p.name.clone()),
                 );
-                let task_name = create_input_list_item("select task...", None);
+                let task_name = create_input_list_item("Default", None);
                 let desc = format_as_active_text_input(
                     &state.new_entry.description,
                     matches!(state.mode, StartOrEditEntryState::EnterDescription),
@@ -491,14 +513,17 @@ impl Tracker {
                 let description = create_input_list_item("add description...", desc.into());
                 frame.render_stateful_widget(
                     List::new(vec![project_name, task_name, description])
-                        .highlight_style(Style::default().bg(Color::DarkGray))
-                        .highlight_symbol(">"),
+                        .highlight_style(Style::default().bg(theme::SUBTEXT_0))
+                        .highlight_symbol("› "),
                     values_area,
                     &mut state.menu_list_state,
                 );
             }
             TimerMode::EditActiveEntry(state) => {
-                let block = block.title(" STARTING TRACKER ");
+                let block = block
+                    .title(" EDITING TRACKER ")
+                    .title_style(theme::YELLOW)
+                    .border_style(theme::YELLOW);
                 frame.render_widget(block, area);
 
                 let labels = List::new(vec![
@@ -521,7 +546,7 @@ impl Tracker {
                 let project_name = project.map(|p| p.name.clone());
 
                 let project_name = create_input_list_item("select project...", project_name);
-                let task_name = create_input_list_item("select task...", None);
+                let task_name = create_input_list_item("Default", None);
                 let desc = format_as_active_text_input(
                     &state.active_entry.description,
                     matches!(state.mode, StartOrEditEntryState::EnterDescription),
@@ -531,8 +556,9 @@ impl Tracker {
                 let start_time = ListItem::from(start_time);
                 frame.render_stateful_widget(
                     List::new(vec![project_name, task_name, description, start_time])
-                        .highlight_style(Style::default().bg(Color::DarkGray))
-                        .highlight_symbol(">"),
+                        // .highlight_style(Style::default().bg(theme::SURFACE_0))
+                        .highlight_style(Style::default().fg(theme::LAVENDER).bold())
+                        .highlight_symbol("› "),
                     values_area,
                     &mut state.menu_list_state,
                 );
@@ -543,6 +569,7 @@ impl Tracker {
     fn render_todays_stats(&self, frame: &mut Frame<'_>, area: Rect) {
         let block = Block::bordered()
             .border_type(ratatui::widgets::BorderType::Rounded)
+            .border_style(theme::LAVENDER)
             .title(" TODAY ")
             .padding(Padding::horizontal(1));
         frame.render_widget(&block, area);
@@ -573,11 +600,11 @@ impl Tracker {
 
         frame.render_widget(
             Paragraph::new(vec![
-                Line::from(format_delta_time_statistic(
+                Line::from(format_duration_verbose(
                     &(self.todays_statistic.total_time + active_session_time),
                 )),
                 Line::from(today_session_count.to_string()),
-                Line::from(format_delta_time_statistic(&std::cmp::max(
+                Line::from(format_duration_verbose(&std::cmp::max(
                     self.todays_statistic.longest_session,
                     active_session_time,
                 ))),
@@ -692,13 +719,13 @@ fn format_as_active_text_input(text: &String, editing_active: bool) -> String {
 
 fn create_input_list_item(placeholder: &str, content: Option<String>) -> ListItem<'_> {
     ListItem::new(Line::from(vec![
-        "[ ".into(),
+        // "[ ".into(),
         match content {
             None => Span::raw(placeholder).italic(),
             Some(c) if c.is_empty() => Span::raw(placeholder).italic(),
             Some(c) => Span::raw(c),
         },
-        Span::raw(" ]"),
+        // Span::raw(" ]"),
     ]))
 }
 
