@@ -196,10 +196,10 @@ impl Tracker {
             Layout::vertical([Constraint::Length(1), Constraint::Min(3)]).areas(block.inner(area));
         let today = Timezone::now();
         frame.render_widget(
-            Paragraph::new(format!(
-                " RECENT ENTRIES · {}",
-                today.format("%A, %d %B %Y")
-            )),
+            Line::from(vec![
+                Span::from(" RECENT ENTRIES").bold().fg(theme::MAUVE),
+                Span::from(format!(" · {}", today.format("%A, %d %B %Y"))),
+            ]),
             title_area,
         );
         let table_block = Block::new()

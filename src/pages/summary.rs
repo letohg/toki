@@ -15,10 +15,12 @@ use std::str::FromStr;
 
 use crate::database::{self, Timezone};
 use crate::pages::format_duration_verbose;
+use crate::theme;
 
 pub struct Summary {
     entries: Vec<database::TimeEntry>,
     projects: Vec<database::Project>,
+    metrics: database::Metrics,
 }
 
 impl Summary {
@@ -26,6 +28,7 @@ impl Summary {
         Self {
             entries: Vec::new(),
             projects: Vec::new(),
+            metrics: database::Metrics::default(),
         }
     }
 
@@ -35,29 +38,36 @@ impl Summary {
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect) {
-        let block = Block::bordered()
-            .border_type(widgets::BorderType::Rounded)
-            .title(" Summary ");
-
-        let [overview_area, stats_area] =
-            Layout::vertical([Constraint::Length(15), Constraint::Min(8)]).areas(block.inner(area));
+        let [header_area, overview_area, stats_area] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(15),
+            Constraint::Min(8),
+        ])
+        .areas(area);
         let [chart_area, _] =
             Layout::horizontal([Constraint::Length(6 + (4 * 31)), Constraint::Min(0)])
                 .areas(overview_area);
 
-        frame.render_widget(block, area);
-        self.render_monthly_barchart(frame, chart_area);
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::from(format!("< {} >", Timezone::now().format("%B %Y"))).centered(),
+            ]),
+            header_area,
+        );
+
+        let now = Timezone::now();
+        let month = now.month();
+        let year = now.year();
+        self.render_monthly_barchart(frame, overview_area, month, year);
 
         let details_block = Block::bordered()
             .border_type(BorderType::Rounded)
             .title(" Details ");
 
-        let now = Timezone::now();
-        let this_month = now.month();
         let montly_time_per_project = self
             .entries
             .iter()
-            .filter(|e| e.start_time.year() == now.year() && e.start_time.month() == this_month)
+            .filter(|e| e.start_time.year() == year && e.start_time.month() == month)
             .into_group_map_by(|e| e.project_id)
             .into_iter()
             .map(|(project_id, entries)| {
@@ -116,15 +126,24 @@ impl Summary {
         // frame.render_widget(details_table, details_area);
     }
 
-    fn render_monthly_barchart(&self, frame: &mut Frame<'_>, chart_area: Rect) {
-        let bar_chart_block = Block::bordered()
-            .border_type(widgets::BorderType::Rounded)
-            .padding(Padding::symmetric(2, 1))
-            .title(" This Month ");
+    fn render_monthly_barchart(
+        &self,
+        frame: &mut Frame<'_>,
+        chart_area: Rect,
+        month: u32,
+        year: i32,
+    ) {
+        let bar_chart_block = Block::new()
+            // .borders(Borders::LEFT | Borders::BOTTOM)
+            // .border_type(BorderType::Rounded)
+            // .border_style(theme::OVERLAY_1)
+            // .borders(Borders::ALL)
+            .padding(Padding::new(1, 1, 1, 0))
+            .title(" Daily Activity ")
+            .title_style(theme::TEXT);
 
         let now = Timezone::now();
         let first_day: chrono::DateTime<Timezone> = now.with_day(1).unwrap();
-        let this_month = now.month();
         let next_month = first_day
             .checked_add_months(chrono::Months::new(1))
             .unwrap();
@@ -133,7 +152,7 @@ impl Summary {
         let this_month_entries = self
             .entries
             .iter()
-            .filter(|e| e.start_time.year() == now.year() && e.start_time.month() == this_month);
+            .filter(|e| e.start_time.year() == year && e.start_time.month() == month);
 
         let time_per_day = this_month_entries
             .clone()
@@ -164,7 +183,7 @@ impl Summary {
                                 project_id,
                                 entries
                                     .iter()
-                                    .map(|e| e.end_time.unwrap_or(Timezone::now()) - e.start_time)
+                                    .map(|e| e.duration())
                                     .sum::<chrono::TimeDelta>(),
                             )
                         })
@@ -188,20 +207,48 @@ impl Summary {
                 let time = time_per_day
                     .get(&d)
                     .map_or(0, |dt| (dt.num_minutes()) as u64);
+
+                let weekday = chrono::NaiveDate::from_ymd_opt(year, month, d)
+                    .unwrap()
+                    .weekday();
+                let weekday_color = if weekday.num_days_from_monday() == 0 {
+                    theme::BLUE
+                } else if weekday.num_days_from_monday() >= 5 {
+                    theme::RED
+                } else {
+                    theme::TEXT
+                };
+
+                let is_weekday = weekday.num_days_from_monday() < 5;
+
+                if time == 0 && !is_weekday {
+                    return widgets::Bar::with_label(Line::from("..").fg(weekday_color), 0)
+                        .text_value("");
+                    // return Some(widgets::Bar::with_label("..".to_string(), 0).text_value(""));
+                }
                 let dominat_projects_color = dominant_project_per_day
                     .get(&d)
                     .map_or(style::Color::White, |c| *c);
-                widgets::Bar::with_label(d.to_string(), time)
+                widgets::Bar::with_label(Line::from(d.to_string()).fg(weekday_color), time)
                     .text_value("")
                     .style(dominat_projects_color)
             })
+            .dedup()
+            // .intersperse(widgets::Bar::with_label("..".to_string(), 0).text_value(""))
             .collect::<Vec<widgets::Bar<'_>>>();
-
+        let charts_inner_area = bar_chart_block.inner(chart_area);
         let summary_chart = ratatui::widgets::BarChart::new(bars)
             .block(bar_chart_block)
-            .bar_width(3)
-            .bar_gap(1)
+            .bar_width(2)
+            // .bar_gap(
+            //     if charts_inner_area.width > ((days_in_month * 3) - 3) as u16 {
+            //         1
+            //     } else {
+            //         0
+            //     },
+            // )
             .group_gap(2)
+            .bg(theme::SURFACE_0)
             .bar_style(Style::new().light_blue())
             .max(12 * 60)
             .value_style(Style::new().italic().bold())

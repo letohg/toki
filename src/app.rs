@@ -18,6 +18,7 @@ use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
 use crate::database;
+use crate::database::Timezone;
 use crate::pages;
 use crate::pages::PageAction;
 use crate::pages::format_duration_verbose;
@@ -60,8 +61,11 @@ impl App {
     }
 
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
+        let mut last_frame_ts = Timezone::now();
         while !self.exit {
-            terminal.draw(|frame| self.draw(frame))?;
+            let dt = Timezone::now() - last_frame_ts;
+            last_frame_ts = Timezone::now();
+            terminal.draw(|frame| self.draw(frame, &dt))?;
             self.handle_events()?;
         }
         Ok(())
@@ -87,7 +91,7 @@ impl App {
         }
     }
 
-    fn draw(&mut self, frame: &mut Frame) {
+    fn draw(&mut self, frame: &mut Frame, dt: &chrono::Duration) {
         // frame.render_widget(
         //     Paragraph::new(vec![
         //         Line::from("ROSEWATER").fg(theme::ROSEWATER),
