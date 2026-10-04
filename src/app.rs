@@ -14,6 +14,9 @@ use ratatui::{
     widgets::Block,
     widgets::Paragraph,
 };
+use resolve_path::PathResolveExt;
+use std::fs::File;
+use std::io::BufReader;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
@@ -48,8 +51,18 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
+        let config_dir = "~/.time_tracker";
+        let settings_file = format!("{}/settings.json", config_dir);
+
+        let file = File::open(settings_file.resolve()).unwrap();
+        let reader = BufReader::new(file);
+        let settings: serde_json::Value = serde_json::from_reader(reader).unwrap();
+        let active_workspace_id = settings["active_workspace_id"].as_str().unwrap();
+        let active_workspace_db = format!("{}/workspaces/{}.db", config_dir, active_workspace_id);
+        dbg!(&active_workspace_db);
+
         let mut app = Self {
-            db: database::Database::new().unwrap(),
+            db: database::Database::new(active_workspace_db).unwrap(),
             exit: false,
             status: "Ready".to_string(),
             current_tracker_state_info: None,

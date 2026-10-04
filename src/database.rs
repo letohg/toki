@@ -95,14 +95,13 @@ pub struct Database {
 }
 
 impl Database {
-    pub fn new() -> rusqlite::Result<Self> {
-        let con = Self::connect()?;
+    pub fn new(db_path: String) -> rusqlite::Result<Self> {
+        let con = Self::connect(db_path)?;
         Ok(Self { con })
     }
 
-    fn connect() -> rusqlite::Result<rusqlite::Connection> {
-        // let db_file = "~/.local/share/time-tracker/data-rs.db".resolve();
-        let db_file = "~/.time_tracker/workspaces/default.db".resolve();
+    fn connect(db_path: String) -> rusqlite::Result<rusqlite::Connection> {
+        let db_file = db_path.resolve();
         rusqlite::Connection::open(db_file)
     }
 
