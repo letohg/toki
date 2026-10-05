@@ -97,9 +97,13 @@ impl App {
                 .map_or(e.project_id.to_string(), |p| p.name.clone());
             (name, e.duration())
         });
+
         match &mut self.active_page {
             Page::Tracker(page) => page.refresh(active_entry, recent_entries, projects, metrics),
-            Page::Projects(page) => page.refresh(projects),
+            Page::Projects(page) => {
+                let project_metrics = self.db.get_stats_per_project().unwrap();
+                page.refresh(projects, project_metrics);
+            }
             Page::Summary(page) => page.refresh(recent_entries, projects, metrics),
         }
     }

@@ -1,4 +1,7 @@
+use std::{collections::HashMap, hash::Hash};
+
 use chrono::{Datelike, Timelike};
+use itertools::Itertools;
 use resolve_path::PathResolveExt;
 use rusqlite::OptionalExtension;
 
@@ -256,6 +259,27 @@ impl Database {
             })
         })?;
         Ok(projects.filter_map(|p| p.ok()).collect())
+    }
+
+    pub fn get_stats_per_project(&self) -> rusqlite::Result<HashMap<EntityId, IntervalMetrics>> {
+        let all_entries = self.get_recent_entries(None, false)?;
+
+        Ok(all_entries
+            .iter()
+            .into_group_map_by(|e| e.project_id)
+            .into_iter()
+            .map(|(p, e)| {
+                let total_time = e.iter().map(|e| e.duration()).sum();
+                let session_count = e.iter().count();
+                (
+                    p,
+                    IntervalMetrics {
+                        total_time,
+                        session_count,
+                    },
+                )
+            })
+            .collect::<HashMap<EntityId, IntervalMetrics>>())
     }
 
     // TODO Edge case, but unrealistic: handle tracking over midnight
