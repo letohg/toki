@@ -16,10 +16,13 @@ use ratatui::{
 use std::str::FromStr;
 
 use crate::database::{self, EntityId, TimeEntry, Timestamp, Timezone};
-use crate::pages::delta_hms;
 use crate::pages::tracker::StartOrEditEntryState::ReviewBeforeStart;
 use crate::pages::tracker::TrackerAction::StartTracking;
-use crate::pages::{PageAction, format_duration_hms_verbose, format_timestamp};
+use crate::pages::{
+    PageAction, format_duration_clock, format_duration_clock_hm, format_duration_hms_verbose,
+    format_timestamp,
+};
+use crate::pages::{delta_hms, format_duration_hm_verbose};
 use crate::theme;
 
 #[derive(Clone, FromPrimitive)]
@@ -182,7 +185,7 @@ impl Tracker {
         let [w, t] = Layout::vertical(split).areas(wt);
 
         self.render_tracker(frame, tracker_area);
-        self.render_metrics(frame, d, "Today", &self.metrics.today_metrics);
+        self.render_today_metrics(frame, d, "Today", &self.metrics.today_metrics);
         self.render_metrics(frame, w, "This Week", &self.metrics.week_metrics);
         self.render_metrics(frame, m, "This Month", &self.metrics.month_metrics);
         self.render_metrics(frame, t, "Total", &self.metrics.total_metrics);
@@ -258,7 +261,7 @@ impl Tracker {
         let column_widths = vec![
             Constraint::Length(15),
             Constraint::Min(0),
-            Constraint::Min(20),
+            Constraint::Fill(20),
             Constraint::Length(8),  // start time - end time
             Constraint::Length(14), // start time - end time
             Constraint::Length(8),  // duration
@@ -586,6 +589,36 @@ impl Tracker {
                 );
             }
         }
+    }
+
+    fn render_today_metrics(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        title: &str,
+        metrics: &database::IntervalMetrics,
+    ) {
+        let block = Block::bordered()
+            .border_type(ratatui::widgets::BorderType::Rounded)
+            .border_style(theme::LAVENDER)
+            .title(format!(" {} ", title))
+            .padding(Padding::horizontal(1));
+        frame.render_widget(&block, area);
+        let area = block.inner(area);
+        let delta = metrics.total_time - chrono::Duration::hours(8);
+        let delta_style = if delta > chrono::Duration::zero() {
+            style::Style::new().italic().fg(theme::GREEN)
+        } else {
+            style::Style::new().italic().fg(theme::MAROON)
+        };
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::from(format_duration_hms_verbose(&metrics.total_time)),
+                Line::from(format_duration_clock_hm(&delta)).style(delta_style),
+            ])
+            .right_aligned(),
+            area,
+        );
     }
 
     fn render_metrics(

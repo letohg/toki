@@ -24,9 +24,18 @@ pub fn format_duration_clock(delta: chrono::TimeDelta) -> String {
     let m = delta.num_minutes() % 60;
     let s = delta.num_seconds() % 60;
     if h > 0 {
-        return format!("{:02}:{:02}:{:02}", h, m, s);
+        return format!("{:2}:{:02}:{:02}", h, m, s);
     }
-    format!("{:02}:{:02}", m, s)
+    format!("{:2}:{:02}", m, s)
+}
+
+pub fn format_duration_clock_hm(delta: &chrono::TimeDelta) -> String {
+    let h = delta.num_hours();
+    let m = delta.num_minutes() % 60;
+    if chrono::TimeDelta::zero() > *delta {
+        return format!("-{}:{:02}", -h, -m);
+    }
+    return format!("{:2}:{:02}", h, m);
 }
 
 pub fn format_duration_hms_verbose(delta: &chrono::TimeDelta) -> String {
@@ -34,17 +43,17 @@ pub fn format_duration_hms_verbose(delta: &chrono::TimeDelta) -> String {
     let m = delta.num_minutes() % 60;
     let s = delta.num_seconds() % 60;
     if h > 0 {
-        return format!("{:02}h {:02}m {:02}s", h, m, s);
+        return format!("{:2}h {:02}m {:02}s", h, m, s);
     }
-    format!("{:02}m {:02}s", m, s)
+    format!("{:2}m {:02}s", m, s)
 }
 pub fn format_duration_hm_verbose(delta: &chrono::TimeDelta) -> String {
     let h = delta.num_hours();
     let m = delta.num_minutes() % 60;
     if h > 0 {
-        return format!("{:02}h {:02}m", h, m);
+        return format!("{:2}h {:02}m", h, m);
     }
-    format!("{:02}m", m)
+    format!("{:2}m", m)
 }
 
 pub fn format_timestamp(ts: &Timestamp) -> String {
