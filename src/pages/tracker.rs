@@ -29,6 +29,7 @@ enum StartOrEditEntryState {
     ProjectSelection,
     TaskSelection,
     EnterDescription,
+    EditStartTime,
     ReviewBeforeStart,
 }
 
@@ -56,6 +57,7 @@ struct EditActiveEntryState {
     mode: StartOrEditEntryState,
     menu_list_state: ListState,
     project_list_state: ListState,
+    time_edit_input: String,
 }
 impl EditActiveEntryState {
     fn default() -> Self {
@@ -64,6 +66,7 @@ impl EditActiveEntryState {
             mode: StartOrEditEntryState::ReviewBeforeStart,
             menu_list_state: ListState::default().with_selected(Some(0)),
             project_list_state: ListState::default().with_selected(Some(0)),
+            time_edit_input: String::default(),
         }
     }
 }
@@ -341,6 +344,7 @@ impl Tracker {
                         mode: StartOrEditEntryState::ReviewBeforeStart,
                         menu_list_state: ListState::default().with_selected(Some(0)),
                         project_list_state: ListState::default().with_selected(Some(0)),
+                        time_edit_input: format_timestamp(&time_entry.start_time),
                     });
                     Some(TrackerAction::ConsumedKey)
                 }
@@ -397,6 +401,16 @@ impl Tracker {
                         }
                         _ => None,
                     },
+
+                    StartOrEditEntryState::EditStartTime => match key_event.code {
+                        KeyCode::Char(c) if c.is_ascii_digit() || c == ':' => {
+                            Some(TrackerAction::ConsumedKey)
+                        }
+                        KeyCode::Backspace => None,
+                        KeyCode::Enter => None,
+                        _ => None,
+                    },
+
                     StartOrEditEntryState::ReviewBeforeStart => match key_event.code {
                         KeyCode::Up | KeyCode::Char('k') => {
                             state.menu_list_state.select_previous();
@@ -480,6 +494,40 @@ impl Tracker {
                             Some(TrackerAction::ConsumedKey)
                         }
                         KeyCode::Enter | KeyCode::Esc => {
+                            state.mode = StartOrEditEntryState::ReviewBeforeStart;
+                            Some(TrackerAction::ConsumedKey)
+                        }
+                        _ => None,
+                    },
+                    StartOrEditEntryState::EditStartTime => match key_event.code {
+                        KeyCode::Esc => {
+                            state.mode = StartOrEditEntryState::ReviewBeforeStart;
+                            Some(TrackerAction::ConsumedKey)
+                        }
+                        KeyCode::Backspace => {
+                            state.time_edit_input.pop();
+                            Some(TrackerAction::ConsumedKey)
+                        }
+                        KeyCode::Char(c) if c.is_ascii_digit() || c == ':' => {
+                            state.time_edit_input.push(c);
+                            Some(TrackerAction::ConsumedKey)
+                        }
+                        KeyCode::Enter => {
+                            let time = chrono::NaiveTime::parse_from_str(
+                                &format!("{:0>4}", &state.time_edit_input),
+                                "%H%M",
+                            )
+                            .or_else(|_| {
+                                chrono::NaiveTime::parse_from_str(&state.time_edit_input, "%H:%M")
+                            });
+                            match time {
+                                Ok(t) => {
+                                    state.active_entry.start_time =
+                                        state.active_entry.start_time.with_time(t).single().unwrap()
+                                }
+                                Err(e) => (),
+                            }
+
                             state.mode = StartOrEditEntryState::ReviewBeforeStart;
                             Some(TrackerAction::ConsumedKey)
                         }
@@ -636,6 +684,11 @@ impl Tracker {
                     matches!(state.mode, StartOrEditEntryState::EnterDescription),
                 );
 
+                let start_time = format_as_active_text_input(
+                    &state.time_edit_input,
+                    matches!(state.mode, StartOrEditEntryState::EditStartTime),
+                );
+
                 let description = create_input_list_item("add description...", desc.into());
                 let start_time = ListItem::from(start_time);
                 frame.render_stateful_widget(
@@ -770,7 +823,12 @@ impl Tracker {
                 }
                 StartOrEditEntryState::TaskSelection => "Select: ⇅  | Quit: q",
                 StartOrEditEntryState::EnterDescription => "Submit: <enter>",
-                ReviewBeforeStart => "Select: ⇅  | Start: <space> | Canlce: <esc> | Quit: q",
+                StartOrEditEntryState::ReviewBeforeStart => {
+                    "Select: ⇅  | Start: <space> | Canlce: <esc> | Quit: q"
+                }
+                StartOrEditEntryState::EditStartTime => {
+                    "Select: ⇅  | Start: <space> | Canlce: <esc> | Quit: q"
+                }
             },
             TimerMode::EditActiveEntry(_) => "Select: ⇅  | Done: d | Cancle: <esc> | Quit: q",
         }
