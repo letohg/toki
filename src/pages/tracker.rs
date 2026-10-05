@@ -6,7 +6,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::style::{self, Color, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
-    Block, BorderType, Borders, Clear, List, ListItem, ListState, Padding, Wrap,
+    Block, BorderType, Borders, Clear, List, ListItem, ListState, Padding, TableState, Wrap,
 };
 use ratatui::{
     Frame,
@@ -16,7 +16,6 @@ use ratatui::{
 use std::str::FromStr;
 
 use crate::database::{self, EntityId, TimeEntry, Timestamp, Timezone};
-use crate::pages::tracker::StartOrEditEntryState::ReviewBeforeStart;
 use crate::pages::tracker::TrackerAction::StartTracking;
 use crate::pages::{
     PageAction, format_duration_clock, format_duration_clock_hm, format_duration_hms_verbose,
@@ -110,6 +109,7 @@ pub struct Tracker {
     projects: Vec<database::Project>,
     timer_mode: TimerMode,
     metrics: database::Metrics,
+    recent_entries_table_state: TableState,
 }
 
 impl Tracker {
@@ -120,6 +120,7 @@ impl Tracker {
             projects: Vec::new(),
             timer_mode: TimerMode::NoRunningEntry,
             metrics: database::Metrics::default(),
+            recent_entries_table_state: TableState::default().with_selected(None),
         }
     }
 
@@ -193,7 +194,7 @@ impl Tracker {
         self.render_recent_entries(frame, entries_area);
     }
 
-    fn render_recent_entries(&self, frame: &mut Frame<'_>, area: Rect) {
+    fn render_recent_entries(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let block = Block::new(); //.padding(Padding::symmetric(1, 1));
         let [title_area, entries_area] =
             Layout::vertical([Constraint::Length(1), Constraint::Min(3)]).areas(block.inner(area));
@@ -266,23 +267,69 @@ impl Tracker {
             Constraint::Length(14), // start time - end time
             Constraint::Length(8),  // duration
         ];
-        let table = Table::new(rows, column_widths).header(headings);
-        frame.render_widget(table, table_area);
+        let table = Table::new(rows, column_widths)
+            .header(headings)
+            .row_highlight_style(style::Style::new().fg(theme::BASE).bg(theme::PINK));
+        frame.render_stateful_widget(table, table_area, &mut self.recent_entries_table_state);
     }
 
     pub fn handle_key_event(&mut self, key_event: KeyEvent) -> Option<PageAction> {
         let action = match &mut self.timer_mode {
-            TimerMode::NoRunningEntry => {
-                match key_event.code {
-                    KeyCode::Char('s') => {
-                        self.timer_mode = TimerMode::StartNewEntry(StartNewEntryState::default());
+            TimerMode::NoRunningEntry => match key_event.code {
+                KeyCode::Char('r') => {
+                    let row = self.recent_entries_table_state.selected().unwrap();
+                    self.recent_entries_table_state =
+                        self.recent_entries_table_state.with_selected(None);
+                    let entry_to_restart = &self.recent_entries[row];
+                    Some(TrackerAction::StartTracking {
+                        project_id: entry_to_restart.project_id,
+                        description: entry_to_restart.description.clone(),
+                        task_id: entry_to_restart.task_id,
+                    })
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if self.recent_entries_table_state.selected().is_none() {
+                        self.recent_entries_table_state =
+                            self.recent_entries_table_state.with_selected(0);
+                    } else {
+                        self.recent_entries_table_state.select_previous();
                     }
-                    KeyCode::Char('q') => {}
-                    _ => (),
-                };
-                None
-            }
+                    Some(TrackerAction::ConsumedKey)
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if self.recent_entries_table_state.selected().is_none() {
+                        self.recent_entries_table_state =
+                            self.recent_entries_table_state.with_selected(0);
+                    } else {
+                        self.recent_entries_table_state.select_next();
+                    }
+                    Some(TrackerAction::ConsumedKey)
+                }
+                KeyCode::Char('s') => {
+                    self.timer_mode = TimerMode::StartNewEntry(StartNewEntryState::default());
+                    Some(TrackerAction::ConsumedKey)
+                }
+                _ => None,
+            },
             TimerMode::ShowActiveEntry(time_entry) => match key_event.code {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if self.recent_entries_table_state.selected().is_none() {
+                        self.recent_entries_table_state =
+                            self.recent_entries_table_state.with_selected(0);
+                    } else {
+                        self.recent_entries_table_state.select_previous();
+                    }
+                    Some(TrackerAction::ConsumedKey)
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if self.recent_entries_table_state.selected().is_none() {
+                        self.recent_entries_table_state =
+                            self.recent_entries_table_state.with_selected(0);
+                    } else {
+                        self.recent_entries_table_state.select_next();
+                    }
+                    Some(TrackerAction::ConsumedKey)
+                }
                 KeyCode::Char('s') => {
                     let entry_id = time_entry.id;
                     self.timer_mode = TimerMode::NoRunningEntry;
@@ -295,7 +342,7 @@ impl Tracker {
                         menu_list_state: ListState::default().with_selected(Some(0)),
                         project_list_state: ListState::default().with_selected(Some(0)),
                     });
-                    None
+                    Some(TrackerAction::ConsumedKey)
                 }
                 _ => None,
             },
@@ -305,9 +352,11 @@ impl Tracker {
                         match key_event.code {
                             KeyCode::Up | KeyCode::Char('k') => {
                                 state.project_list_state.select_previous();
+                                Some(TrackerAction::ConsumedKey)
                             }
                             KeyCode::Down | KeyCode::Char('j') => {
                                 state.project_list_state.select_next();
+                                Some(TrackerAction::ConsumedKey)
                             }
                             KeyCode::Enter => {
                                 let idx = state.project_list_state.selected().unwrap();
@@ -315,20 +364,24 @@ impl Tracker {
                                 state.new_entry.project = Some(selected_project);
                                 // TODO: continue with task selection
                                 state.mode = StartOrEditEntryState::ReviewBeforeStart;
+                                Some(TrackerAction::ConsumedKey)
                             }
-                            KeyCode::Esc => state.mode = StartOrEditEntryState::ReviewBeforeStart,
-                            _ => (),
-                        };
-                        None
+                            KeyCode::Esc => {
+                                state.mode = StartOrEditEntryState::ReviewBeforeStart;
+                                Some(TrackerAction::ConsumedKey)
+                            }
+                            _ => None,
+                        }
                     }
 
-                    StartOrEditEntryState::TaskSelection => {
-                        if let KeyCode::Enter = key_event.code {
+                    StartOrEditEntryState::TaskSelection => match key_event.code {
+                        KeyCode::Enter => {
                             state.menu_list_state.select_next();
                             state.mode = StartOrEditEntryState::ReviewBeforeStart;
+                            Some(TrackerAction::ConsumedKey)
                         }
-                        None
-                    }
+                        _ => None,
+                    },
                     StartOrEditEntryState::EnterDescription => match key_event.code {
                         KeyCode::Char(c) => {
                             state.new_entry.description.push(c);
@@ -336,11 +389,11 @@ impl Tracker {
                         }
                         KeyCode::Backspace => {
                             state.new_entry.description.pop();
-                            None
+                            Some(TrackerAction::ConsumedKey)
                         }
                         KeyCode::Enter | KeyCode::Esc => {
                             state.mode = StartOrEditEntryState::ReviewBeforeStart;
-                            None
+                            Some(TrackerAction::ConsumedKey)
                         }
                         _ => None,
                     },
@@ -387,9 +440,11 @@ impl Tracker {
                         match key_event.code {
                             KeyCode::Up | KeyCode::Char('k') => {
                                 state.project_list_state.select_previous();
+                                Some(TrackerAction::ConsumedKey)
                             }
                             KeyCode::Down | KeyCode::Char('j') => {
                                 state.project_list_state.select_next();
+                                Some(TrackerAction::ConsumedKey)
                             }
                             KeyCode::Enter => {
                                 let idx = state.project_list_state.selected().unwrap();
@@ -397,20 +452,24 @@ impl Tracker {
                                 state.active_entry.project_id = selected_project.id;
                                 // TODO: continue with task selection
                                 state.mode = StartOrEditEntryState::ReviewBeforeStart;
+                                Some(TrackerAction::ConsumedKey)
                             }
-                            KeyCode::Esc => state.mode = StartOrEditEntryState::ReviewBeforeStart,
-                            _ => (),
-                        };
-                        None
+                            KeyCode::Esc => {
+                                state.mode = StartOrEditEntryState::ReviewBeforeStart;
+                                Some(TrackerAction::ConsumedKey)
+                            }
+                            _ => None,
+                        }
                     }
 
-                    StartOrEditEntryState::TaskSelection => {
-                        if let KeyCode::Enter = key_event.code {
+                    StartOrEditEntryState::TaskSelection => match key_event.code {
+                        KeyCode::Enter => {
                             state.menu_list_state.select_next();
                             state.mode = StartOrEditEntryState::ReviewBeforeStart;
+                            Some(TrackerAction::ConsumedKey)
                         }
-                        None
-                    }
+                        _ => None,
+                    },
                     StartOrEditEntryState::EnterDescription => match key_event.code {
                         KeyCode::Char(c) => {
                             state.active_entry.description.push(c);
@@ -418,11 +477,11 @@ impl Tracker {
                         }
                         KeyCode::Backspace => {
                             state.active_entry.description.pop();
-                            None
+                            Some(TrackerAction::ConsumedKey)
                         }
                         KeyCode::Enter | KeyCode::Esc => {
                             state.mode = StartOrEditEntryState::ReviewBeforeStart;
-                            None
+                            Some(TrackerAction::ConsumedKey)
                         }
                         _ => None,
                     },
@@ -434,11 +493,11 @@ impl Tracker {
                         }
                         KeyCode::Up | KeyCode::Char('k') => {
                             state.menu_list_state.select_previous();
-                            None
+                            Some(TrackerAction::ConsumedKey)
                         }
                         KeyCode::Down | KeyCode::Char('j') => {
                             state.menu_list_state.select_next();
-                            None
+                            Some(TrackerAction::ConsumedKey)
                         }
                         KeyCode::Enter => {
                             state.mode = StartOrEditEntryState::from_usize(
