@@ -272,7 +272,8 @@ impl Tracker {
         ];
         let table = Table::new(rows, column_widths)
             .header(headings)
-            .row_highlight_style(style::Style::new().fg(theme::BASE).bg(theme::PINK));
+            .row_highlight_style(style::Style::new().fg(theme::BASE).bg(theme::PINK))
+            .cell_highlight_style(style::Style::new().fg(theme::BASE).bg(theme::LAVENDER));
         frame.render_stateful_widget(table, table_area, &mut self.recent_entries_table_state);
     }
 
@@ -282,7 +283,7 @@ impl Tracker {
                 KeyCode::Char('r') => {
                     let row = self.recent_entries_table_state.selected().unwrap();
                     self.recent_entries_table_state =
-                        self.recent_entries_table_state.with_selected(None);
+                        self.recent_entries_table_state.with_selected_cell(None);
                     let entry_to_restart = &self.recent_entries[row];
                     Some(TrackerAction::StartTracking {
                         project_id: entry_to_restart.project_id,
@@ -308,6 +309,24 @@ impl Tracker {
                     }
                     Some(TrackerAction::ConsumedKey)
                 }
+                KeyCode::Left | KeyCode::Char('h') => {
+                    if self.recent_entries_table_state.selected().is_none() {
+                        self.recent_entries_table_state =
+                            self.recent_entries_table_state.with_selected(0);
+                    } else {
+                        self.recent_entries_table_state.select_previous_column();
+                    }
+                    Some(TrackerAction::ConsumedKey)
+                }
+                KeyCode::Right | KeyCode::Char('l') => {
+                    if self.recent_entries_table_state.selected_column().is_none() {
+                        self.recent_entries_table_state =
+                            self.recent_entries_table_state.with_selected_column(0);
+                    } else {
+                        self.recent_entries_table_state.select_next_column();
+                    }
+                    Some(TrackerAction::ConsumedKey)
+                }
                 KeyCode::Char('s') => {
                     self.timer_mode = TimerMode::StartNewEntry(StartNewEntryState::default());
                     Some(TrackerAction::ConsumedKey)
@@ -315,6 +334,11 @@ impl Tracker {
                 _ => None,
             },
             TimerMode::ShowActiveEntry(time_entry) => match key_event.code {
+                KeyCode::Esc => {
+                    self.recent_entries_table_state =
+                        self.recent_entries_table_state.with_selected_cell(None);
+                    Some(TrackerAction::ConsumedKey)
+                }
                 KeyCode::Up | KeyCode::Char('k') => {
                     if self.recent_entries_table_state.selected().is_none() {
                         self.recent_entries_table_state =
@@ -330,6 +354,24 @@ impl Tracker {
                             self.recent_entries_table_state.with_selected(0);
                     } else {
                         self.recent_entries_table_state.select_next();
+                    }
+                    Some(TrackerAction::ConsumedKey)
+                }
+                KeyCode::Left | KeyCode::Char('h') => {
+                    if self.recent_entries_table_state.selected().is_none() {
+                        self.recent_entries_table_state =
+                            self.recent_entries_table_state.with_selected(0);
+                    } else {
+                        self.recent_entries_table_state.select_previous_column();
+                    }
+                    Some(TrackerAction::ConsumedKey)
+                }
+                KeyCode::Right | KeyCode::Char('l') => {
+                    if self.recent_entries_table_state.selected_column().is_none() {
+                        self.recent_entries_table_state =
+                            self.recent_entries_table_state.with_selected_column(0);
+                    } else {
+                        self.recent_entries_table_state.select_next_column();
                     }
                     Some(TrackerAction::ConsumedKey)
                 }
@@ -601,19 +643,27 @@ impl Tracker {
 
                 let duration = delta_hms(&entry.start_time, &entry.end_time.unwrap_or(self.now));
                 let project_name = project.map_or("None".to_string(), |p| p.name.clone());
-                let description = entry.description.clone();
-
-                render_active_tracker_info_value(
-                    frame,
-                    TrackingInfo {
-                        duration,
-                        project_name,
-                        project_color,
-                        task: "".into(),
-                        description,
-                    },
+                frame.render_widget(
+                    Paragraph::new(duration)
+                        .style(style::Color::Green)
+                        .centered()
+                        .bold(),
                     time_area,
-                    labels_area,
+                );
+
+                let labels = Paragraph::new(vec![
+                    Line::from("Project     :"),
+                    Line::from("Task        :"),
+                    Line::from("Description :"),
+                ]);
+                frame.render_widget(labels, labels_area);
+
+                let project_name = Line::from(project_name).style(project_color);
+                let task_name = Line::from("Default").fg(theme::OVERLAY_0);
+                let description = Line::from(entry.description.clone());
+                frame.render_widget(
+                    Paragraph::new(vec![project_name, task_name, description])
+                        .wrap(Wrap { trim: false }),
                     values_area,
                 );
             }
@@ -641,7 +691,17 @@ impl Tracker {
                     matches!(state.mode, StartOrEditEntryState::EnterDescription),
                 );
 
-                let description = create_input_list_item("add description...", desc.into());
+                let input_field_width = (values_area.width - 3) as usize;
+
+                let description = if desc.len() > input_field_width {
+                    let trailing_len = desc.len() - input_field_width;
+                    create_input_list_item(
+                        "add description...",
+                        Some(format!("..{}", &desc[trailing_len..])),
+                    )
+                } else {
+                    create_input_list_item("add description...", desc.into())
+                };
                 frame.render_stateful_widget(
                     List::new(vec![project_name, task_name, description])
                         // .highlight_style(Style::default().bg(theme::SURFACE_0))
@@ -842,27 +902,6 @@ fn render_active_tracker_info_value(
     labels_area: Rect,
     values_area: Rect,
 ) {
-    frame.render_widget(
-        Paragraph::new(info.duration)
-            .style(style::Color::Green)
-            .centered(),
-        time_area,
-    );
-
-    let labels = Paragraph::new(vec![
-        Line::from("Project     :"),
-        Line::from("Task        :"),
-        Line::from("Description :"),
-    ]);
-    frame.render_widget(labels, labels_area);
-
-    let project_name = Line::from(info.project_name).style(info.project_color);
-    let task_name = Line::from(info.task);
-    let description = Line::from(info.description);
-    frame.render_widget(
-        Paragraph::new(vec![project_name, task_name, description]),
-        values_area,
-    );
 }
 
 fn render_no_active_tracker(frame: &mut Frame<'_>, tracker_area: Rect) {
