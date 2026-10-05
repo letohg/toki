@@ -210,16 +210,17 @@ impl Tracker {
         let table_area = table_block.inner(entries_area);
 
         let headings = Row::new(
-            ["Name", "Task", "Description", "Day", "Time", "Total"]
+            ["Name", "Task", "Description", " Day", "Time", "Total"]
                 .into_iter()
                 .map(|t| Cell::from(t).bold().fg(theme::ROSEWATER)),
-        );
+        )
+        .underlined();
         let rows = self.recent_entries.iter().enumerate().map(|(i, e)| {
             let project = self.projects.iter().find(|p| p.id == e.project_id);
             let project_color = project.map_or(style::Color::Yellow, |p| {
                 style::Color::from_str(&p.color).unwrap_or_default()
             });
-            let row_fg_color = e.end_time.map_or(theme::GREEN, |_| theme::TEXT);
+            let row_fg_color = e.end_time.map_or(theme::GREEN, |_| theme::SUBTEXT_1);
             let row_bg_color = if i % 2 == 0 {
                 theme::BASE
             } else {
@@ -231,16 +232,18 @@ impl Tracker {
                 "-".into(),
                 Cell::from(if e.description.is_empty() {
                     "-".to_string()
+                } else if e.description.len() >= 18 {
+                    format!("{}..", &e.description[..18])
                 } else {
                     e.description.clone()
                 })
                 .fg(row_fg_color),
-                Cell::from(e.start_time.format("%d-%b").to_string()).fg(row_fg_color),
+                Cell::from(e.start_time.format(" %d-%b").to_string()).fg(row_fg_color),
                 Cell::from(format!(
                     "{} - {}",
                     format_timestamp(&e.start_time),
                     e.end_time
-                        .map_or("Running".to_owned(), |ts| format_timestamp(&ts))
+                        .map_or("now".to_owned(), |ts| format_timestamp(&ts))
                 ))
                 .fg(row_fg_color),
                 Cell::from(format!(
@@ -255,10 +258,10 @@ impl Tracker {
         let column_widths = vec![
             Constraint::Length(15),
             Constraint::Min(0),
-            Constraint::Min(0),
-            Constraint::Length(12), // start time - end time
-            Constraint::Length(18), // start time - end time
-            Constraint::Length(10), // duration
+            Constraint::Min(20),
+            Constraint::Length(8),  // start time - end time
+            Constraint::Length(14), // start time - end time
+            Constraint::Length(8),  // duration
         ];
         let table = Table::new(rows, column_widths).header(headings);
         frame.render_widget(table, table_area);

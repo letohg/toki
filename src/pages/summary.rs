@@ -1,5 +1,5 @@
 use chrono::Datelike;
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use itertools::Itertools;
 use ratatui::layout::Layout;
 use ratatui::style::{self, Stylize};
@@ -22,6 +22,9 @@ pub struct Summary {
     entries: Vec<database::TimeEntry>,
     projects: Vec<database::Project>,
     metrics: database::Metrics,
+    year: i32,
+    month: u32,
+    counter: i32,
 }
 
 impl Summary {
@@ -30,6 +33,9 @@ impl Summary {
             entries: Vec::new(),
             projects: Vec::new(),
             metrics: database::Metrics::default(),
+            year: Timezone::now().year(),
+            month: Timezone::now().month(),
+            counter: 0,
         }
     }
 
@@ -57,15 +63,18 @@ impl Summary {
 
         frame.render_widget(
             Paragraph::new(vec![
-                Line::from(format!("< {} >", Timezone::now().format("%B %Y"))).centered(),
+                Line::from(format!(
+                    "< {} >",
+                    chrono::NaiveDate::from_ymd_opt(self.year, self.month, 1)
+                        .unwrap()
+                        .format("%B %Y")
+                ))
+                .centered(),
             ]),
             header_area,
         );
 
-        let now = Timezone::now();
-        let month = now.month();
-        let year = now.year();
-        self.render_monthly_barchart(frame, overview_area, month, year);
+        self.render_monthly_barchart(frame, overview_area, self.month, self.year);
 
         let details_block = Block::bordered()
             .border_type(BorderType::Rounded)
@@ -75,15 +84,12 @@ impl Summary {
         let monthly_time_per_project = self
             .entries
             .iter()
-            .filter(|e| e.start_time.year() == year && e.start_time.month() == month)
+            .filter(|e| e.start_time.year() == self.year && e.start_time.month() == self.month)
             .into_group_map_by(|e| e.project_id)
             .into_iter()
             .map(|(project_id, entries)| {
                 let project = self.projects.iter().find(|p| p.id == project_id).unwrap();
-                let total_time = entries
-                    .iter()
-                    .map(|e| e.end_time.unwrap_or(now) - e.start_time)
-                    .sum();
+                let total_time = entries.iter().map(|e| e.duration()).sum();
                 (project.clone(), total_time)
             })
             .sorted_by(|(p1, _), (p2, _)| Ord::cmp(&p1.id, &p2.id))
@@ -124,7 +130,7 @@ impl Summary {
                 one_eighth: HALF,
                 empty: " ",
             };
-        let monthly_total = self.metrics.month_metrics.total_time;
+        let monthly_total: chrono::Duration = monthly_time_per_project.iter().map(|(_, t)| t).sum();
         let [chart_area, numbers_area] =
             Layout::horizontal([Constraint::Min(0), Constraint::Length(16)])
                 .areas(details_block.inner(details_area));
@@ -182,8 +188,8 @@ impl Summary {
             .title(" Daily Activity ")
             .title_style(theme::TEXT);
 
-        let now = Timezone::now();
-        let first_day: chrono::DateTime<Timezone> = now.with_day(1).unwrap();
+        let first_day = chrono::NaiveDate::from_ymd_opt(self.year, self.month, 1)
+            .expect(format!("Failed to get date from {}-{}", month, year).as_str());
         let next_month = first_day
             .checked_add_months(chrono::Months::new(1))
             .unwrap();
@@ -247,10 +253,11 @@ impl Summary {
                 let time = time_per_day
                     .get(&d)
                     .map_or(0, |dt| (dt.num_minutes()) as u64);
+                let date = chrono::NaiveDate::from_ymd_opt(self.year, self.month, d).expect(
+                    format!("Failed to create date from {}.{}.{}", d, month, year).as_str(),
+                );
 
-                let weekday = chrono::NaiveDate::from_ymd_opt(year, month, d)
-                    .unwrap()
-                    .weekday();
+                let weekday = date.weekday();
                 let weekday_color = if weekday.num_days_from_monday() == 0 {
                     theme::BLUE
                 } else if weekday.num_days_from_monday() >= 5 {
@@ -290,7 +297,7 @@ impl Summary {
             .bar_width(2)
             // .bar_gap(
             //     if charts_inner_area.width > ((days_in_month * 3) - 3) as u16 {
-            //         1
+            //
             //     } else {
             //         0
             //     },
@@ -305,6 +312,45 @@ impl Summary {
     }
 
     pub fn handle_key_event(&mut self, key_event: KeyEvent) -> bool {
-        false
+        match key_event {
+            KeyEvent {
+                code: KeyCode::Char('H') | KeyCode::Left,
+                modifiers: KeyModifiers::SHIFT,
+                ..
+            } => {
+                self.year -= 1;
+                true
+            }
+            KeyEvent {
+                code: KeyCode::Char('L') | KeyCode::Right,
+                modifiers: KeyModifiers::SHIFT,
+                ..
+            } => {
+                self.year += 1;
+                true
+            }
+            _ => match key_event.code {
+                KeyCode::Left | KeyCode::Char('h') => {
+                    self.counter += 1;
+                    if self.month == 1 {
+                        self.month = 12;
+                        self.year -= 1;
+                    }
+                    self.month -= 1;
+                    true
+                }
+
+                KeyCode::Right | KeyCode::Char('l') => {
+                    self.counter -= 1;
+                    if self.month == 12 {
+                        self.month = 1;
+                        self.year += 1;
+                    }
+                    self.month += 1;
+                    true
+                }
+                _ => false,
+            },
+        }
     }
 }
