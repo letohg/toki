@@ -22,6 +22,7 @@ use strum_macros::EnumIter;
 
 use crate::database;
 use crate::database::Timezone;
+use crate::notify;
 use crate::pages;
 use crate::pages::PageAction;
 use crate::pages::format_duration_hms_verbose;
@@ -47,6 +48,7 @@ pub struct App {
     current_tracker_state_info: Option<(String, chrono::Duration)>,
     active_page: Page,
     error_message: Option<String>,
+    notifier: notify::Notifier,
 }
 
 impl App {
@@ -68,6 +70,7 @@ impl App {
             current_tracker_state_info: None,
             active_page: Page::Tracker(pages::tracker::Tracker::new()),
             error_message: None,
+            notifier: notify::Notifier::new(),
         };
         app.update_state();
         app
@@ -167,6 +170,7 @@ impl App {
         frame.render_widget(&footer_block, bottom);
         self.render_footer(frame, footer_block.inner(bottom));
         self.render_popup(frame, window.inner(area));
+        self.notifier.render(frame, middle);
     }
 
     fn render_popup(&mut self, frame: &mut Frame, area: Rect) {
@@ -327,7 +331,7 @@ impl App {
     ) -> Result<bool, color_eyre::eyre::Error> {
         match &mut self.active_page {
             Page::Tracker(p) => {
-                if let Some(action) = p.handle_key_event(key_event) {
+                if let Some(action) = p.handle_key_event(key_event, &mut self.notifier) {
                     return self.handle_page_action(action);
                 }
                 Ok(false)

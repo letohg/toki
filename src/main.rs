@@ -1,5 +1,6 @@
 mod app;
 mod database;
+mod notify;
 mod pages;
 mod theme;
 

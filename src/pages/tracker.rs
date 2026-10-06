@@ -22,7 +22,7 @@ use crate::pages::{
     format_timestamp,
 };
 use crate::pages::{delta_hms, format_duration_hm_verbose};
-use crate::theme;
+use crate::{notify, theme};
 
 #[derive(Clone, FromPrimitive)]
 enum StartOrEditEntryState {
@@ -277,7 +277,11 @@ impl Tracker {
         frame.render_stateful_widget(table, table_area, &mut self.recent_entries_table_state);
     }
 
-    pub fn handle_key_event(&mut self, key_event: KeyEvent) -> Option<PageAction> {
+    pub fn handle_key_event(
+        &mut self,
+        key_event: KeyEvent,
+        notifier: &mut notify::Notifier,
+    ) -> Option<PageAction> {
         let action = match &mut self.timer_mode {
             TimerMode::NoRunningEntry => match key_event.code {
                 KeyCode::Char('r') => {
@@ -285,6 +289,7 @@ impl Tracker {
                     self.recent_entries_table_state =
                         self.recent_entries_table_state.with_selected_cell(None);
                     let entry_to_restart = &self.recent_entries[row];
+                    notifier.notify_info("New Tracker started");
                     Some(TrackerAction::StartTracking {
                         project_id: entry_to_restart.project_id,
                         description: entry_to_restart.description.clone(),
@@ -298,6 +303,7 @@ impl Tracker {
                     } else {
                         self.recent_entries_table_state.select_previous();
                     }
+                    notifier.notify_info("Up");
                     Some(TrackerAction::ConsumedKey)
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
@@ -307,6 +313,7 @@ impl Tracker {
                     } else {
                         self.recent_entries_table_state.select_next();
                     }
+                    notifier.notify_error("Down");
                     Some(TrackerAction::ConsumedKey)
                 }
                 KeyCode::Left | KeyCode::Char('h') => {
