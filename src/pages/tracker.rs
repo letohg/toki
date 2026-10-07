@@ -303,7 +303,6 @@ impl Tracker {
                     } else {
                         self.recent_entries_table_state.select_previous();
                     }
-                    notifier.notify_info("Up");
                     Some(TrackerAction::ConsumedKey)
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
@@ -313,7 +312,6 @@ impl Tracker {
                     } else {
                         self.recent_entries_table_state.select_next();
                     }
-                    notifier.notify_error("Down");
                     Some(TrackerAction::ConsumedKey)
                 }
                 KeyCode::Left | KeyCode::Char('h') => {
@@ -479,6 +477,11 @@ impl Tracker {
                             // Showing the new timer will be triggered by the app after a database
                             // entry has been created
                             Some(start_tracking_action)
+                        }
+                        KeyCode::Char(' ') => {
+                            notifier
+                                .notify_info("Cannot start tracker without selecting a project");
+                            Some(TrackerAction::ConsumedKey)
                         }
                         KeyCode::Enter => {
                             state.mode = StartOrEditEntryState::from_usize(
