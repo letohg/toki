@@ -1,7 +1,8 @@
-use std::{collections::HashMap, hash::Hash};
+use std::{collections::HashMap, hash::Hash, str::FromStr};
 
 use chrono::{Datelike, Timelike};
 use itertools::Itertools;
+use ratatui::style;
 use resolve_path::PathResolveExt;
 use rusqlite::OptionalExtension;
 
@@ -34,7 +35,7 @@ fn string_to_ts(s: String) -> Timestamp {
 pub struct Project {
     pub id: EntityId,
     pub name: String,
-    pub color: String, // hex color
+    pub color: style::Color,
     pub description: String,
     pub created_at: Timestamp,
 }
@@ -250,10 +251,11 @@ impl Database {
         )?;
 
         let projects = stmt.query_map([], |row| {
+            let color: String = row.get(2)?;
             Ok(Project {
                 id: row.get(0)?,
                 name: row.get(1)?,
-                color: row.get(2)?,
+                color: style::Color::from_str(&color).unwrap_or_default(),
                 description: row.get(3)?,
                 created_at: string_to_ts(row.get(4)?),
             })

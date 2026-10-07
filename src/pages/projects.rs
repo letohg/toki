@@ -51,8 +51,7 @@ impl Project {
         let rows = self.projects.iter().map(|p| {
             let metrics = self.metrics_per_project.get(&p.id);
             Row::new(vec![
-                Cell::from(p.name.clone())
-                    .style(Style::new().fg(style::Color::from_str(&p.color).unwrap())),
+                Cell::from(p.name.clone()).style(Style::new().fg(p.color)),
                 Cell::from(p.description.clone()),
                 Cell::from(metrics.map_or("--:--".to_string(), |m| {
                     format_duration_hms_verbose(&m.total_time)

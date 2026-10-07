@@ -99,8 +99,7 @@ impl Summary {
         let details_table = Table::new(
             monthly_time_per_project.iter().map(|(p, h)| {
                 Row::new([
-                    Cell::from(p.name.clone())
-                        .style(style::Color::from_str(&p.color).unwrap_or_default()),
+                    Cell::from(p.name.clone()).style(p.color),
                     Cell::from(
                         Span::from(format_duration_hms_verbose(h)).into_right_aligned_line(),
                     ),
@@ -111,9 +110,12 @@ impl Summary {
         let bars = monthly_time_per_project
             .iter()
             .map(|(p, h)| {
-                tui_barchart_ext::barchart::Bar::with_label(p.name.clone(), h.num_hours() as u64)
-                    .text_value("")
-                    .style(style::Color::from_str(&p.color).unwrap_or_default())
+                tui_barchart_ext::barchart::Bar::with_label(
+                    Line::from(p.name.clone()).fg(p.color),
+                    h.num_hours() as u64,
+                )
+                .text_value("")
+                .style(p.color)
             })
             .collect::<Vec<tui_barchart_ext::barchart::Bar>>();
 
@@ -235,13 +237,10 @@ impl Summary {
                         })
                         .max_by(|(_, duration1), (_, duration2)| Ord::cmp(duration1, duration2))
                         .map(|(project_id, _)| {
-                            self.projects.iter().find(|p| p.id == project_id).map_or(
-                                style::Color::White,
-                                |p| {
-                                    style::Color::from_str(&p.color)
-                                        .unwrap_or(style::Color::Magenta)
-                                },
-                            )
+                            self.projects
+                                .iter()
+                                .find(|p| p.id == project_id)
+                                .map_or(style::Color::White, |p| p.color)
                         })
                         .unwrap(),
                 )

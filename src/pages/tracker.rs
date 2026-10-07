@@ -224,9 +224,6 @@ impl Tracker {
         .underlined();
         let rows = self.recent_entries.iter().enumerate().map(|(i, e)| {
             let project = self.projects.iter().find(|p| p.id == e.project_id);
-            let project_color = project.map_or(style::Color::Yellow, |p| {
-                style::Color::from_str(&p.color).unwrap_or_default()
-            });
             let row_fg_color = e.end_time.map_or(theme::GREEN, |_| theme::SUBTEXT_1);
             let row_bg_color = if i % 2 == 0 {
                 theme::BASE
@@ -234,8 +231,9 @@ impl Tracker {
                 theme::SURFACE_0
             };
             Row::new(vec![
-                Cell::from(project.map_or("None".to_string(), |p| format!("• {}", p.name)))
-                    .fg(project_color),
+                project.map_or(Cell::from("None"), |p| {
+                    Cell::from(format!("• {}", p.name).fg(p.color))
+                }),
                 "-".into(),
                 Cell::from(if e.description.is_empty() {
                     "-".to_string()
@@ -637,12 +635,8 @@ impl Tracker {
                     .border_style(theme::MAROON);
                 frame.render_widget(block, area);
                 let project = self.projects.iter().find(|p| p.id == entry.project_id);
-                let project_color = project.map_or(style::Color::Yellow, |p| {
-                    style::Color::from_str(&p.color).unwrap_or_default()
-                });
 
                 let duration = delta_hms(&entry.start_time, &entry.end_time.unwrap_or(self.now));
-                let project_name = project.map_or("None".to_string(), |p| p.name.clone());
                 frame.render_widget(
                     Paragraph::new(duration)
                         .style(style::Color::Green)
@@ -658,7 +652,9 @@ impl Tracker {
                 ]);
                 frame.render_widget(labels, labels_area);
 
-                let project_name = Line::from(project_name).style(project_color);
+                let project_name = project.map_or(Line::from("None"), |p| {
+                    Line::from(format!("• {}", p.name).fg(p.color))
+                });
                 let task_name = Line::from("Default").fg(theme::OVERLAY_0);
                 let description = Line::from(entry.description.clone());
                 frame.render_widget(
@@ -730,9 +726,6 @@ impl Tracker {
                     .projects
                     .iter()
                     .find(|p| p.id == state.active_entry.project_id);
-                let project_color = project.map_or(style::Color::Yellow, |p| {
-                    style::Color::from_str(&p.color).unwrap_or_default()
-                });
 
                 let start_time = format_timestamp(&state.active_entry.start_time);
                 let project_name = project.map(|p| p.name.clone());
@@ -948,10 +941,11 @@ fn render_project_selection_list(
         .title("Select Project");
     frame.render_widget(&block, centered_area);
 
-    let project_list = List::new(projects.iter().map(|p| {
-        ListItem::new(p.name.as_str())
-            .style(Style::new().fg(style::Color::from_str(&p.color).unwrap()))
-    }))
+    let project_list = List::new(
+        projects
+            .iter()
+            .map(|p| ListItem::new(p.name.as_str()).style(Style::new().fg(p.color))),
+    )
     .highlight_style(Style::default().bg(theme::SURFACE_0))
     .highlight_symbol("› ");
     frame.render_stateful_widget(project_list, block.inner(centered_area), list_state);
