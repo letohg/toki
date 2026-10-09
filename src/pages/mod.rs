@@ -9,6 +9,12 @@ pub mod projects;
 pub mod summary;
 pub mod tracker;
 
+pub enum KeyResult<A> {
+    Unhandled,
+    Consumed,
+    Action(A),
+}
+
 pub enum PageAction {
     Tracker(TrackerAction),
     Projects(ProjectAction),

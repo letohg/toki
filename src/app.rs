@@ -324,12 +324,13 @@ impl App {
                 }
                 Ok(false)
             }
-            Page::Projects(p) => {
-                if let Some(action) = p.handle_key_event(key_event) {
-                    return self.handle_page_action(action);
+            Page::Projects(p) => match p.handle_key_event(key_event) {
+                pages::KeyResult::Unhandled => Ok(false),
+                pages::KeyResult::Consumed => Ok(true),
+                pages::KeyResult::Action(a) => {
+                    return self.handle_page_action(a);
                 }
-                Ok(false)
-            }
+            },
             Page::Summary(p) => Ok(p.handle_key_event(key_event)),
         }
     }

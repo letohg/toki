@@ -13,7 +13,7 @@ use std::default;
 use std::str::FromStr;
 
 use crate::database::{self, EntityId};
-use crate::pages::{PageAction, format_duration_hms_verbose};
+use crate::pages::{KeyResult, PageAction, format_duration_hms_verbose};
 use crate::theme;
 
 pub enum ProjectAction {
@@ -44,18 +44,6 @@ impl CreateProjectForm {
     fn render(&mut self, frame: &mut Frame, area: Rect) {
         self.form.render(frame, area);
     }
-
-    fn handle_key_event(&mut self, key_event: KeyEvent) -> Option<ProjectAction> {
-        let form_outcome = self.form.handle_key_event(key_event)?;
-
-        match form_outcome {
-            FormOutcome::Submitted(fields) => Some(ProjectAction::CreateProject {
-                name: fields[0].to_owned(),
-                description: fields[1].to_owned(),
-            }),
-            FormOutcome::Cancelled => None,
-        }
-    }
 }
 
 struct EditProjectForm {
@@ -80,9 +68,12 @@ impl EditProjectForm {
         self.form.render(frame, area);
     }
 
-    fn handle_key_event(&mut self, key_event: KeyEvent) -> Option<(EntityId, FormOutcome)> {
-        let form_outcome = self.form.handle_key_event(key_event)?;
-        Some((self.project.id, form_outcome))
+    fn handle_key_event(&mut self, key_event: KeyEvent) -> KeyResult<(EntityId, FormOutcome)> {
+        match self.form.handle_key_event(key_event) {
+            KeyResult::Unhandled => KeyResult::Unhandled,
+            KeyResult::Consumed => KeyResult::Consumed,
+            KeyResult::Action(outcome) => KeyResult::Action((self.project.id, outcome)),
+        }
     }
 }
 
@@ -204,55 +195,65 @@ impl Project {
         frame.render_stateful_widget(table, table_area, &mut self.table_state);
     }
 
-    pub fn handle_key_event(&mut self, key_event: KeyEvent) -> Option<PageAction> {
+    pub fn handle_key_event(&mut self, key_event: KeyEvent) -> KeyResult<PageAction> {
         match &mut self.page_state {
             PageState::Overview => self.handle_main_page_key_event(key_event),
             PageState::CreateProject(form) => {
-                let form_outcome = form.form.handle_key_event(key_event)?;
+                let form_outcome = form.form.handle_key_event(key_event);
 
                 match form_outcome {
-                    FormOutcome::Submitted(fields) => {
+                    KeyResult::Action(FormOutcome::Submitted(fields)) => {
                         self.page_state = PageState::Overview;
-                        return Some(PageAction::Projects(ProjectAction::CreateProject {
-                            name: fields[0].to_owned(),
-                            description: fields[1].to_owned(),
-                        }));
+                        return KeyResult::Action(PageAction::Projects(
+                            ProjectAction::CreateProject {
+                                name: fields[0].to_owned(),
+                                description: fields[1].to_owned(),
+                            },
+                        ));
                     }
-                    FormOutcome::Cancelled => self.page_state = PageState::Overview,
+                    KeyResult::Action(FormOutcome::Cancelled) => {
+                        self.page_state = PageState::Overview;
+                        KeyResult::Consumed
+                    }
+                    KeyResult::Unhandled => KeyResult::Unhandled,
+                    KeyResult::Consumed => KeyResult::Consumed,
                 }
-                true
             }
             PageState::EditProjectInfo(form) => {
-                let form_outcome = form.handle_key_event(key_event)?;
+                let form_outcome = form.handle_key_event(key_event);
 
                 match form_outcome {
-                    (id, FormOutcome::Submitted(fields)) => {
+                    KeyResult::Action((id, FormOutcome::Submitted(fields))) => {
                         self.page_state = PageState::Overview;
-                        return Some(PageAction::Projects(ProjectAction::UpdateProject {
-                            id,
-                            name: fields[0].to_owned(),
-                            description: fields[1].to_owned(),
-                        }));
+                        return KeyResult::Action(PageAction::Projects(
+                            ProjectAction::UpdateProject {
+                                id,
+                                name: fields[0].to_owned(),
+                                description: fields[1].to_owned(),
+                            },
+                        ));
                     }
-                    (id, FormOutcome::Cancelled) => self.page_state = PageState::Overview,
+                    KeyResult::Action((id, FormOutcome::Cancelled)) => {
+                        self.page_state = PageState::Overview;
+                        KeyResult::Consumed
+                    }
+                    KeyResult::Unhandled => KeyResult::Unhandled,
+                    KeyResult::Consumed => KeyResult::Consumed,
                 }
-                true
             }
-        };
-
-        None
+        }
     }
-    fn handle_main_page_key_event(&mut self, key_event: KeyEvent) -> bool {
+    fn handle_main_page_key_event(&mut self, key_event: KeyEvent) -> KeyResult<PageAction> {
         match key_event.code {
             KeyCode::Char('a') => {
                 self.page_state = PageState::CreateProject(CreateProjectForm::default());
-                true
+                KeyResult::Consumed
             }
             KeyCode::Char('e') if self.table_state.selected().is_some() => {
                 let row = self.table_state.selected().unwrap();
                 let project = self.projects.get(row).unwrap().clone();
                 self.page_state = PageState::EditProjectInfo(EditProjectForm::new(project));
-                true
+                KeyResult::Consumed
             }
             KeyCode::Char('k') | KeyCode::Up => {
                 if self.table_state.selected().is_none() {
@@ -260,7 +261,7 @@ impl Project {
                 } else {
                     self.table_state.select_previous();
                 }
-                true
+                KeyResult::Consumed
             }
             KeyCode::Char('j') | KeyCode::Down => {
                 if self.table_state.selected().is_none() {
@@ -268,23 +269,23 @@ impl Project {
                 } else {
                     self.table_state.select_next();
                 }
-                true
+                KeyResult::Consumed
             }
             KeyCode::Enter => {
                 // Enter project name or description
-                true
+                KeyResult::Consumed
             }
             KeyCode::Char('d') if self.table_state.selected().is_some() => {
                 let row = self.table_state.selected().unwrap();
                 let project_id = self.projects.get(row).unwrap().id;
                 // return Some(ProjectAction::DeleteProject(project_id));
-                true
+                KeyResult::Consumed
             }
             KeyCode::Char(' ') => {
                 self.page_state = PageState::Overview;
-                true
+                KeyResult::Consumed
             }
-            _ => false,
+            _ => KeyResult::Unhandled,
         }
     }
     // fn handle_create_project_form_key_event(
@@ -356,7 +357,7 @@ impl InputForm {
         }
     }
 
-    fn handle_key_event(&mut self, key_event: KeyEvent) -> Option<FormOutcome> {
+    fn handle_key_event(&mut self, key_event: KeyEvent) -> KeyResult<FormOutcome> {
         match self.active_input {
             Some(field_idx) => {
                 match key_event {
@@ -367,41 +368,51 @@ impl InputForm {
                     } => {
                         self.list_state.select_previous();
                         self.active_input = self.list_state.selected();
+                        KeyResult::Consumed
                     }
                     _ => {
                         match key_event.code {
-                            KeyCode::Char(c) => self.values.get_mut(field_idx).unwrap().push(c),
+                            KeyCode::Char(c) => {
+                                self.values.get_mut(field_idx).unwrap().push(c);
+                                KeyResult::Consumed
+                            }
                             KeyCode::Backspace => {
                                 self.values.get_mut(field_idx).unwrap().pop();
+                                KeyResult::Consumed
                             }
                             // Todo: Esc should revert to old value
-                            KeyCode::Esc | KeyCode::Enter => self.active_input = None,
+                            KeyCode::Esc | KeyCode::Enter => {
+                                self.active_input = None;
+                                KeyResult::Consumed
+                            }
                             KeyCode::Tab => {
                                 self.list_state.select_next();
                                 self.active_input = self.list_state.selected();
+                                KeyResult::Consumed
                             }
-                            _ => (),
+                            _ => KeyResult::Unhandled,
                         }
                     }
-                };
-                None
+                }
             }
             None => match key_event.code {
                 KeyCode::Char('k') | KeyCode::Up => {
                     self.list_state.select_previous();
-                    None
+                    KeyResult::Consumed
                 }
                 KeyCode::Char('j') | KeyCode::Down => {
                     self.list_state.select_next();
-                    None
+                    KeyResult::Consumed
                 }
                 KeyCode::Enter => {
                     self.active_input = self.list_state.selected();
-                    None
+                    KeyResult::Consumed
                 }
-                KeyCode::Esc => Some(FormOutcome::Cancelled),
-                KeyCode::Char(' ') => Some(FormOutcome::Submitted(self.values.to_owned())),
-                _ => None,
+                KeyCode::Esc => KeyResult::Action(FormOutcome::Cancelled),
+                KeyCode::Char(' ') => {
+                    KeyResult::Action(FormOutcome::Submitted(self.values.to_owned()))
+                }
+                _ => KeyResult::Unhandled,
             },
         }
     }
