@@ -51,18 +51,10 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
-        let config_dir = "~/.time_tracker";
-        let settings_file = format!("{}/settings.json", config_dir);
-
-        let file = File::open(settings_file.resolve()).unwrap();
-        let reader = BufReader::new(file);
-        let settings: serde_json::Value = serde_json::from_reader(reader).unwrap();
-        let active_workspace_id = settings["active_workspace_id"].as_str().unwrap();
-        let active_workspace_db = format!("{}/workspaces/{}.db", config_dir, active_workspace_id);
-        dbg!(&active_workspace_db);
+        let database_file = get_active_workspace_db();
 
         let mut app = Self {
-            db: database::Database::new(active_workspace_db).unwrap(),
+            db: database::Database::new(database_file).unwrap(),
             exit: false,
             status: "Ready".to_string(),
             current_tracker_state_info: None,
@@ -372,4 +364,20 @@ impl App {
     fn set_error(&mut self, msg: String) {
         self.error_message = Some(msg);
     }
+}
+
+fn get_active_workspace_db() -> String {
+    const CONFIG_DIR: &str = "~/.time_tracker";
+    let settings_file = format!("{}/settings.json", CONFIG_DIR);
+
+    let database_file = if matches!(std::fs::exists(&settings_file), Ok(true)) {
+        let file = File::open(settings_file.resolve()).unwrap();
+        let reader = BufReader::new(file);
+        let settings: serde_json::Value = serde_json::from_reader(reader).unwrap();
+        let id = settings["active_workspace_id"].as_str().unwrap();
+        format!("{CONFIG_DIR}/workspaces/{}.db", id)
+    } else {
+        format!("{CONFIG_DIR}/workspaces/default.db")
+    };
+    database_file
 }

@@ -1,4 +1,7 @@
-use std::{collections::HashMap, hash::Hash};
+use std::{
+    collections::{HashMap, HashSet},
+    hash::Hash,
+};
 
 use chrono::{Datelike, Timelike};
 use itertools::Itertools;
@@ -105,11 +108,103 @@ impl Database {
 
     fn connect(db_path: String) -> rusqlite::Result<rusqlite::Connection> {
         let db_file = db_path.resolve();
-        rusqlite::Connection::open(db_file)
+        let con = rusqlite::Connection::open(db_file)?;
+        Self::create_tables(&con)?;
+        Ok(con)
     }
 
     fn get_connection(&self) -> &rusqlite::Connection {
         &self.con
+    }
+
+    fn create_tables(con: &rusqlite::Connection) -> rusqlite::Result<()> {
+        con.execute_batch(
+            r#"
+            BEGIN;
+            CREATE TABLE IF NOT EXISTS projects (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                name       TEXT    NOT NULL UNIQUE,
+                color      TEXT    NOT NULL DEFAULT '#4A90D9',
+                description TEXT   NOT NULL DEFAULT '',
+                created_at TEXT    NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS project_tasks (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id  INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                name        TEXT    NOT NULL,
+                description TEXT    NOT NULL DEFAULT '',
+                created_at  TEXT    NOT NULL,
+                UNIQUE(project_id, name)
+            );
+
+            CREATE TABLE IF NOT EXISTS time_entries (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id  INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                task_id     INTEGER REFERENCES project_tasks(id) ON DELETE SET NULL,
+                description TEXT    NOT NULL DEFAULT '',
+                start_time  TEXT    NOT NULL,
+                end_time    TEXT,
+                created_at  TEXT    NOT NULL
+            );
+            COMMIT;
+        "#,
+        )?;
+        Self::ensure_column(
+            con,
+            "projects",
+            "description",
+            "description TEXT NOT NULL DEFAULT ''",
+        )?;
+        Self::ensure_column(
+            con,
+            "time_entries",
+            "task_id",
+            "task_id INTEGER REFERENCES project_tasks(id) ON DELETE SET NULL",
+        )?;
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_project_tasks_project_id
+            ON project_tasks(project_id)",
+            [],
+        )?;
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_time_entries_task_id
+            ON time_entries(task_id)",
+            [],
+        )?;
+
+        Ok(())
+    }
+
+    fn ensure_column(
+        con: &rusqlite::Connection,
+        table_name: &str,
+        column_name: &str,
+        column_definition: &str,
+    ) -> rusqlite::Result<()> {
+        let columns = Self::table_columns(con, table_name)?;
+        if columns.contains(column_name) {
+            con.execute(
+                format!("ALTER TABLE {table_name} ADD COLUMN {column_definition}").as_str(),
+                [],
+            );
+        }
+        Ok(())
+    }
+
+    fn table_columns(
+        conn: &rusqlite::Connection,
+        table_name: &str,
+    ) -> rusqlite::Result<HashSet<String>> {
+        let mut columns = HashSet::new();
+
+        conn.pragma(None, "table_info", table_name, |row| {
+            let name: String = row.get(1)?;
+            columns.insert(name);
+            Ok(())
+        })?;
+
+        Ok(columns)
     }
 
     pub fn start_entry(

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use ratatui::style::Color;
 
 pub const ROSEWATER: Color = Color::Rgb(245, 224, 220);
