@@ -283,9 +283,9 @@ impl Database {
 
     pub fn create_project(
         &self,
-        name: String,
-        color: String,
-        description: String,
+        name: &str,
+        color: &str,
+        description: &str,
     ) -> rusqlite::Result<()> {
         let now = get_now_utc_py();
         let con = self.get_connection();
@@ -294,6 +294,21 @@ impl Database {
             (name, color, description, now),
         )?;
         // TODO: return newly created project
+        Ok(())
+    }
+
+    pub fn update_project(
+        &self,
+        project_id: EntityId,
+        name: &str,
+        color: &str,
+        description: &str,
+    ) -> rusqlite::Result<()> {
+        let con = self.get_connection();
+        con.execute(
+            "UPDATE projects SET name = ?, color = ?, description = ? WHERE id = ?",
+            [name, color, description, &project_id.to_string()],
+        )?;
         Ok(())
     }
 

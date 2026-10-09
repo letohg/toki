@@ -364,7 +364,17 @@ impl App {
             },
             PageAction::Projects(a) => match a {
                 pages::projects::ProjectAction::CreateProject { name, description } => {
-                    let _ = self.db.create_project(name, "#4A90D9".into(), description);
+                    let _ = self.db.create_project(&name, "#4A90D9", &description);
+                    self.update_state();
+                    true
+                }
+                pages::projects::ProjectAction::UpdateProject {
+                    id,
+                    name,
+                    description,
+                } => {
+                    let _ = self.db.update_project(id, &name, "#4A90D9", &description);
+                    self.update_state();
                     true
                 }
             },

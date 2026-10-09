@@ -4,6 +4,7 @@ use ratatui::style::{self, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     Block, Borders, Cell, Clear, List, ListItem, ListState, Padding, Paragraph, Row, Table,
+    TableState,
 };
 use ratatui::{Frame, layout::Rect};
 use ratatui::{layout::Constraint, style::Style};
@@ -16,38 +17,86 @@ use crate::pages::{PageAction, format_duration_hms_verbose};
 use crate::theme;
 
 pub enum ProjectAction {
-    CreateProject { name: String, description: String },
+    CreateProject {
+        name: String,
+        description: String,
+    },
+    UpdateProject {
+        id: EntityId,
+        name: String,
+        description: String,
+    },
 }
 
-#[derive(Default)]
-struct NewProjectInfo {
-    name: String,
-    description: String,
+struct CreateProjectForm {
+    form: InputForm,
 }
-
-struct CreateProjectState {
-    input_form: InputForm,
-}
-impl CreateProjectState {
+impl CreateProjectForm {
     fn default() -> Self {
         Self {
-            input_form: InputForm::new(
+            form: InputForm::new(
                 vec!["Name:".into(), "Description:".into()],
                 vec!["add name..".into(), "add description..".into()],
             ),
         }
     }
+
+    fn render(&mut self, frame: &mut Frame, area: Rect) {
+        self.form.render(frame, area);
+    }
+
+    fn handle_key_event(&mut self, key_event: KeyEvent) -> Option<ProjectAction> {
+        let form_outcome = self.form.handle_key_event(key_event)?;
+
+        match form_outcome {
+            FormOutcome::Submitted(fields) => Some(ProjectAction::CreateProject {
+                name: fields[0].to_owned(),
+                description: fields[1].to_owned(),
+            }),
+            FormOutcome::Cancelled => None,
+        }
+    }
+}
+
+struct EditProjectForm {
+    project: database::Project,
+    form: InputForm,
+}
+
+impl EditProjectForm {
+    fn new(project: database::Project) -> Self {
+        let values = vec![project.name.clone(), project.description.clone()];
+        Self {
+            project,
+            form: InputForm::with_values(
+                vec!["Name:".into(), "Description:".into()],
+                vec!["add name..".into(), "add description..".into()],
+                values,
+            ),
+        }
+    }
+
+    fn render(&mut self, frame: &mut Frame, area: Rect) {
+        self.form.render(frame, area);
+    }
+
+    fn handle_key_event(&mut self, key_event: KeyEvent) -> Option<(EntityId, FormOutcome)> {
+        let form_outcome = self.form.handle_key_event(key_event)?;
+        Some((self.project.id, form_outcome))
+    }
 }
 
 enum PageState {
     Overview,
-    CreateProject(CreateProjectState),
+    CreateProject(CreateProjectForm),
+    EditProjectInfo(EditProjectForm),
 }
 
 pub struct Project {
     projects: Vec<database::Project>,
     metrics_per_project: HashMap<EntityId, database::IntervalMetrics>,
     page_state: PageState,
+    table_state: TableState,
 }
 
 impl Project {
@@ -56,6 +105,7 @@ impl Project {
             projects: Vec::new(),
             metrics_per_project: HashMap::new(),
             page_state: PageState::Overview,
+            table_state: TableState::default(),
         }
     }
 
@@ -69,65 +119,62 @@ impl Project {
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
-        let block = Block::new().padding(Padding::symmetric(1, 1));
+        // let block = Block::new().padding(Padding::symmetric(1, 1));
 
-        self.render_project_list(frame, block.inner(area));
+        // self.render_project_list(frame, block.inner(area));
+        self.render_project_list(frame, area);
 
         match &mut self.page_state {
-            PageState::CreateProject(state) => {
+            PageState::CreateProject(form) => {
                 let center_area = area.centered(Constraint::Length(50), Constraint::Length(20));
                 frame.render_widget(Clear, center_area);
                 let create_project_block = Block::bordered()
                     .border_type(ratatui::widgets::BorderType::Rounded)
                     .bg(theme::BASE);
+                let form_area = create_project_block.inner(center_area);
 
                 frame.render_widget(&create_project_block, center_area);
-                state
-                    .input_form
-                    .render(frame, create_project_block.inner(center_area));
+                form.render(frame, form_area);
+            }
+            PageState::EditProjectInfo(form) => {
+                let center_area = area.centered(Constraint::Length(50), Constraint::Length(20));
+                frame.render_widget(Clear, center_area);
+                let create_project_block = Block::bordered()
+                    .border_type(ratatui::widgets::BorderType::Rounded)
+                    .bg(theme::BASE);
+                let form_area = create_project_block.inner(center_area);
 
-                // let [lables_area, inputs_area] =
-                //     Layout::horizontal([Constraint::Length(14), Constraint::Min(6)])
-                //         .areas(create_project_block.inner(center_area));
-                // frame.render_widget(create_project_block, center_area);
-                //
-                // let labels = List::new(vec!["Name:", "Description:"]);
-                // frame.render_stateful_widget(labels, lables_area, &mut state.list_state);
-                //
-                // let project_name =
-                //     create_input_list_item("add name...", Some(state.new_project.name.clone()));
-                // let project_description = create_input_list_item(
-                //     "add name...",
-                //     Some(state.new_project.description.clone()),
-                // );
-                //
-                // frame.render_stateful_widget(
-                //     List::new(vec![project_name, project_description])
-                //         .highlight_style(Style::default().fg(theme::LAVENDER).bold())
-                //         .highlight_symbol("› "),
-                //     inputs_area,
-                //     &mut state.list_state,
-                // );
+                frame.render_widget(&create_project_block, center_area);
+                form.render(frame, form_area);
             }
             PageState::Overview => (),
         }
     }
 
-    fn render_project_list(&self, frame: &mut Frame<'_>, area: Rect) {
+    fn render_project_list(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let [title_area, entries_area] =
             Layout::vertical([Constraint::Length(1), Constraint::Min(3)]).areas(area);
-        frame.render_widget(Paragraph::new("Projects"), title_area);
-        let table_block = Block::new().borders(Borders::TOP);
+        frame.render_widget(Paragraph::new(" Projects"), title_area);
+        let table_block = Block::new()
+            .borders(Borders::ALL)
+            .border_type(ratatui::widgets::BorderType::Rounded);
         frame.render_widget(&table_block, entries_area);
         let table_area = table_block.inner(entries_area);
 
         let headings = Row::new(
             ["Name", "Description", "Total Hours"]
                 .into_iter()
-                .map(|t| Cell::from(t).bold()),
-        );
-        let rows = self.projects.iter().map(|p| {
+                .map(|t| Cell::from(t).bold().fg(theme::ROSEWATER)),
+        )
+        .underlined();
+        let rows = self.projects.iter().enumerate().map(|(i, p)| {
             let metrics = self.metrics_per_project.get(&p.id);
+
+            let row_bg_color = if i % 2 == 0 {
+                theme::BASE
+            } else {
+                theme::SURFACE_0
+            };
             Row::new(vec![
                 Cell::from(p.name.clone())
                     .style(Style::new().fg(style::Color::from_str(&p.color).unwrap())),
@@ -142,6 +189,7 @@ impl Project {
                     .right_aligned(),
                 ),
             ])
+            .bg(row_bg_color)
         });
         let column_widths = vec![
             Constraint::Length(15),
@@ -151,39 +199,45 @@ impl Project {
         ];
         let table = Table::new(rows, column_widths)
             .header(headings)
-            .style(Style::new().add_modifier(style::Modifier::BOLD));
-        frame.render_widget(table, table_area);
+            .row_highlight_style(style::Style::new().fg(theme::BASE).bg(theme::PINK))
+            .cell_highlight_style(style::Style::new().fg(theme::BASE).bg(theme::LAVENDER));
+        frame.render_stateful_widget(table, table_area, &mut self.table_state);
     }
 
     pub fn handle_key_event(&mut self, key_event: KeyEvent) -> Option<PageAction> {
         match &mut self.page_state {
             PageState::Overview => self.handle_main_page_key_event(key_event),
-            PageState::CreateProject(state) => {
-                let action = state.input_form.handle_key_event(key_event);
-                if let Some(a) = action {
-                    self.page_state = PageState::Overview;
-                    return Some(PageAction::Projects(a));
+            PageState::CreateProject(form) => {
+                let form_outcome = form.form.handle_key_event(key_event)?;
+
+                match form_outcome {
+                    FormOutcome::Submitted(fields) => {
+                        self.page_state = PageState::Overview;
+                        return Some(PageAction::Projects(ProjectAction::CreateProject {
+                            name: fields[0].to_owned(),
+                            description: fields[1].to_owned(),
+                        }));
+                    }
+                    FormOutcome::Cancelled => self.page_state = PageState::Overview,
                 }
                 true
-            } //     match key_event.code {
-              //     KeyCode::Char('k') | KeyCode::Up => {
-              //         state.list_state.select_previous();
-              //         true
-              //     }
-              //     KeyCode::Char('j') | KeyCode::Down => {
-              //         state.list_state.select_next();
-              //         true
-              //     }
-              //     KeyCode::Enter => {
-              //         // Enter project name or description
-              //         true
-              //     }
-              //     KeyCode::Char('d') | KeyCode::Char(' ') => {
-              //         self.page_state = PageState::Overview;
-              //         true
-              //     }
-              //     _ => false,
-              // },
+            }
+            PageState::EditProjectInfo(form) => {
+                let form_outcome = form.handle_key_event(key_event)?;
+
+                match form_outcome {
+                    (id, FormOutcome::Submitted(fields)) => {
+                        self.page_state = PageState::Overview;
+                        return Some(PageAction::Projects(ProjectAction::UpdateProject {
+                            id,
+                            name: fields[0].to_owned(),
+                            description: fields[1].to_owned(),
+                        }));
+                    }
+                    (id, FormOutcome::Cancelled) => self.page_state = PageState::Overview,
+                }
+                true
+            }
         };
 
         None
@@ -191,7 +245,43 @@ impl Project {
     fn handle_main_page_key_event(&mut self, key_event: KeyEvent) -> bool {
         match key_event.code {
             KeyCode::Char('a') => {
-                self.page_state = PageState::CreateProject(CreateProjectState::default());
+                self.page_state = PageState::CreateProject(CreateProjectForm::default());
+                true
+            }
+            KeyCode::Char('e') if self.table_state.selected().is_some() => {
+                let row = self.table_state.selected().unwrap();
+                let project = self.projects.get(row).unwrap().clone();
+                self.page_state = PageState::EditProjectInfo(EditProjectForm::new(project));
+                true
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if self.table_state.selected().is_none() {
+                    self.table_state.select(Some(0));
+                } else {
+                    self.table_state.select_previous();
+                }
+                true
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if self.table_state.selected().is_none() {
+                    self.table_state.select(Some(0));
+                } else {
+                    self.table_state.select_next();
+                }
+                true
+            }
+            KeyCode::Enter => {
+                // Enter project name or description
+                true
+            }
+            KeyCode::Char('d') if self.table_state.selected().is_some() => {
+                let row = self.table_state.selected().unwrap();
+                let project_id = self.projects.get(row).unwrap().id;
+                // return Some(ProjectAction::DeleteProject(project_id));
+                true
+            }
+            KeyCode::Char(' ') => {
+                self.page_state = PageState::Overview;
                 true
             }
             _ => false,
@@ -228,6 +318,11 @@ fn create_input_list_item(placeholder: &str, content: Option<String>) -> ListIte
     }]))
 }
 
+enum FormOutcome {
+    Submitted(Vec<String>),
+    Cancelled,
+}
+
 struct InputForm {
     list_state: ListState,
     labels: Vec<String>,
@@ -249,7 +344,19 @@ impl InputForm {
         }
     }
 
-    fn handle_key_event(&mut self, key_event: KeyEvent) -> Option<ProjectAction> {
+    fn with_values(labels: Vec<String>, placeholders: Vec<String>, values: Vec<String>) -> Self {
+        let mut values = values;
+        values.resize(labels.len(), "".to_string());
+        Self {
+            list_state: ListState::default().with_selected(Some(0)),
+            labels,
+            placeholders,
+            values,
+            active_input: None,
+        }
+    }
+
+    fn handle_key_event(&mut self, key_event: KeyEvent) -> Option<FormOutcome> {
         match self.active_input {
             Some(field_idx) => {
                 match key_event {
@@ -292,10 +399,8 @@ impl InputForm {
                     self.active_input = self.list_state.selected();
                     None
                 }
-                KeyCode::Char(' ') => Some(ProjectAction::CreateProject {
-                    name: self.values[0].clone(),
-                    description: self.values[1].clone(),
-                }),
+                KeyCode::Esc => Some(FormOutcome::Cancelled),
+                KeyCode::Char(' ') => Some(FormOutcome::Submitted(self.values.to_owned())),
                 _ => None,
             },
         }
