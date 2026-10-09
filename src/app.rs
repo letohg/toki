@@ -324,7 +324,12 @@ impl App {
                 }
                 Ok(false)
             }
-            Page::Projects(p) => Ok(p.handle_key_event(key_event)),
+            Page::Projects(p) => {
+                if let Some(action) = p.handle_key_event(key_event) {
+                    return self.handle_page_action(action);
+                }
+                Ok(false)
+            }
             Page::Summary(p) => Ok(p.handle_key_event(key_event)),
         }
     }
@@ -357,6 +362,12 @@ impl App {
                 // TODO: ensure that this causes app to not check for keys
                 pages::tracker::TrackerAction::ConsumedKey => true,
             },
+            PageAction::Projects(a) => match a {
+                pages::projects::ProjectAction::CreateProject { name, description } => {
+                    let _ = self.db.create_project(name, "#4A90D9".into(), description);
+                    true
+                }
+            },
             _ => false,
         })
     }
@@ -370,7 +381,7 @@ fn get_active_workspace_db() -> String {
     const CONFIG_DIR: &str = "~/.time_tracker";
     let settings_file = format!("{}/settings.json", CONFIG_DIR);
 
-    let database_file = if matches!(std::fs::exists(&settings_file), Ok(true)) {
+    if matches!(std::fs::exists(&settings_file), Ok(true)) {
         let file = File::open(settings_file.resolve()).unwrap();
         let reader = BufReader::new(file);
         let settings: serde_json::Value = serde_json::from_reader(reader).unwrap();
@@ -378,6 +389,5 @@ fn get_active_workspace_db() -> String {
         format!("{CONFIG_DIR}/workspaces/{}.db", id)
     } else {
         format!("{CONFIG_DIR}/workspaces/default.db")
-    };
-    database_file
+    }
 }

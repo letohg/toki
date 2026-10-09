@@ -2,7 +2,7 @@ use ratatui::{Frame, layout::Rect};
 
 use crate::{
     database::{Timestamp, Timezone},
-    pages::tracker::TrackerAction,
+    pages::{projects::ProjectAction, tracker::TrackerAction},
 };
 
 pub mod projects;
@@ -11,7 +11,7 @@ pub mod tracker;
 
 pub enum PageAction {
     Tracker(TrackerAction),
-    Projects,
+    Projects(ProjectAction),
 }
 
 pub fn delta_hms(start: &Timestamp, end: &Timestamp) -> String {

@@ -281,6 +281,22 @@ impl Database {
         Ok(())
     }
 
+    pub fn create_project(
+        &self,
+        name: String,
+        color: String,
+        description: String,
+    ) -> rusqlite::Result<()> {
+        let now = get_now_utc_py();
+        let con = self.get_connection();
+        con.execute(
+            "INSERT INTO projects (name, color, description, created_at) VALUES (?, ?, ?, ?)",
+            (name, color, description, now),
+        )?;
+        // TODO: return newly created project
+        Ok(())
+    }
+
     pub fn get_recent_entries(
         &self,
         limit: Option<u32>,
