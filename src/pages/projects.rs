@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Layout;
 use ratatui::style::{self, Stylize};
-use ratatui::text::{Line, Span};
+use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
     Block, Borders, Cell, Clear, List, ListItem, ListState, Padding, Paragraph, Row, Table,
     TableState,
@@ -19,11 +19,13 @@ use crate::theme;
 pub enum ProjectAction {
     CreateProject {
         name: String,
+        color: String,
         description: String,
     },
     UpdateProject {
         id: EntityId,
         name: String,
+        color: String,
         description: String,
     },
 }
@@ -34,10 +36,15 @@ struct CreateProjectForm {
 impl CreateProjectForm {
     fn default() -> Self {
         Self {
-            form: InputForm::new(
-                vec!["Name:".into(), "Description:".into()],
-                vec!["add name..".into(), "add description..".into()],
-            ),
+            form: InputForm::new(vec![
+                ("Name:".into(), InputFieldType::String, "add name..".into()),
+                ("Color:".into(), InputFieldType::Color, "#4A90D9".into()),
+                (
+                    "Description:".into(),
+                    InputFieldType::String,
+                    "add description..".into(),
+                ),
+            ]),
         }
     }
 
@@ -57,8 +64,15 @@ impl EditProjectForm {
         Self {
             project,
             form: InputForm::with_values(
-                vec!["Name:".into(), "Description:".into()],
-                vec!["add name..".into(), "add description..".into()],
+                vec![
+                    ("Name:".into(), InputFieldType::String, "add name..".into()),
+                    ("Color:".into(), InputFieldType::Color, "#4A90D9".into()),
+                    (
+                        "Description:".into(),
+                        InputFieldType::String,
+                        "add description..".into(),
+                    ),
+                ],
                 values,
             ),
         }
@@ -207,7 +221,8 @@ impl Project {
                         return KeyResult::Action(PageAction::Projects(
                             ProjectAction::CreateProject {
                                 name: fields[0].to_owned(),
-                                description: fields[1].to_owned(),
+                                color: fields[1].to_owned(),
+                                description: fields[2].to_owned(),
                             },
                         ));
                     }
@@ -229,7 +244,8 @@ impl Project {
                             ProjectAction::UpdateProject {
                                 id,
                                 name: fields[0].to_owned(),
-                                description: fields[1].to_owned(),
+                                color: fields[1].to_owned(),
+                                description: fields[2].to_owned(),
                             },
                         ));
                     }
@@ -324,34 +340,38 @@ enum FormOutcome {
     Cancelled,
 }
 
+enum InputFieldType {
+    String,
+    Color,
+    Time,
+}
+
+type InputFormLabels = Vec<(String, InputFieldType, String)>;
 struct InputForm {
     list_state: ListState,
-    labels: Vec<String>,
-    placeholders: Vec<String>,
+    labels: InputFormLabels,
     values: Vec<String>,
     active_input: Option<usize>,
 }
 
 impl InputForm {
-    fn new(labels: Vec<String>, placeholders: Vec<String>) -> Self {
+    fn new(labels: InputFormLabels) -> Self {
         let mut values = Vec::new();
         values.resize(labels.len(), "".to_string());
         Self {
             list_state: ListState::default().with_selected(Some(0)),
             labels,
-            placeholders,
             values,
             active_input: None,
         }
     }
 
-    fn with_values(labels: Vec<String>, placeholders: Vec<String>, values: Vec<String>) -> Self {
+    fn with_values(labels: InputFormLabels, values: Vec<String>) -> Self {
         let mut values = values;
         values.resize(labels.len(), "".to_string());
         Self {
             list_state: ListState::default().with_selected(Some(0)),
             labels,
-            placeholders,
             values,
             active_input: None,
         }
@@ -360,6 +380,7 @@ impl InputForm {
     fn handle_key_event(&mut self, key_event: KeyEvent) -> KeyResult<FormOutcome> {
         match self.active_input {
             Some(field_idx) => {
+                let input_type = &self.labels[field_idx].1;
                 match key_event {
                     KeyEvent {
                         code: KeyCode::Tab,
@@ -372,10 +393,23 @@ impl InputForm {
                     }
                     _ => {
                         match key_event.code {
-                            KeyCode::Char(c) => {
-                                self.values.get_mut(field_idx).unwrap().push(c);
-                                KeyResult::Consumed
-                            }
+                            KeyCode::Char(c) => match *input_type {
+                                InputFieldType::String => {
+                                    self.values.get_mut(field_idx).unwrap().push(c);
+                                    KeyResult::Consumed
+                                }
+                                InputFieldType::Color if c.is_ascii_hexdigit() => {
+                                    let val = self.values.get_mut(field_idx).unwrap();
+                                    if val.len() < 6 {
+                                        val.push(c);
+                                    }
+                                    KeyResult::Consumed
+                                }
+                                InputFieldType::Time if c.is_ascii_digit() || c == ':' => {
+                                    KeyResult::Consumed
+                                }
+                                _ => KeyResult::Consumed,
+                            },
                             KeyCode::Backspace => {
                                 self.values.get_mut(field_idx).unwrap().pop();
                                 KeyResult::Consumed
@@ -421,31 +455,64 @@ impl InputForm {
         let [lables_area, inputs_area] =
             Layout::horizontal([Constraint::Length(14), Constraint::Min(6)]).areas(area);
 
-        let labels = List::new(self.labels.clone());
-        frame.render_stateful_widget(labels, lables_area, &mut self.list_state);
-
-        let inputs: List = self
-            .values
+        let (labels, inputs): (Vec<ListItem>, Vec<ListItem>) = self
+            .labels
             .iter()
-            .zip(&self.placeholders)
+            .zip(&self.values)
             .enumerate()
-            .map(|(i, (v, p))| {
-                if let Some(active) = self.active_input
-                    && active == i
-                {
-                    ListItem::from(format!("{}│", v))
-                } else {
-                    create_input_list_item(p, Some(v.clone()))
-                }
-            })
-            .collect();
+            .map(|(i, ((l, t, p), v))| {
+                let label = match t {
+                    InputFieldType::Color => ListItem::from(Line::from(vec![
+                        Span::from(l),
+                        Span::from(" ").fg(style::Color::from_str(v).unwrap_or_default()),
+                    ])),
 
+                    _ => ListItem::from(l.clone()),
+                };
+                (
+                    label,
+                    if let Some(active) = self.active_input
+                        && active == i
+                    {
+                        ListItem::from(format!("{}│", v))
+                    } else {
+                        create_input_list_item(p, Some(v.clone()))
+                    },
+                )
+            })
+            .unzip();
+
+        frame.render_stateful_widget(List::new(labels), lables_area, &mut self.list_state);
         frame.render_stateful_widget(
-            inputs
+            List::new(inputs)
                 .highlight_style(Style::default().fg(theme::LAVENDER).bold())
                 .highlight_symbol("› "),
             inputs_area,
             &mut self.list_state,
         );
+
+        // let inputs: List = self
+        //     .values
+        //     .iter()
+        //     .zip(&self.placeholders)
+        //     .enumerate()
+        //     .map(|(i, (v, p))| {
+        //         if let Some(active) = self.active_input
+        //             && active == i
+        //         {
+        //             ListItem::from(format!("{}│", v))
+        //         } else {
+        //             create_input_list_item(p, Some(v.clone()))
+        //         }
+        //     })
+        //     .collect();
+
+        // frame.render_stateful_widget(
+        //     inputs
+        //         .highlight_style(Style::default().fg(theme::LAVENDER).bold())
+        //         .highlight_symbol("› "),
+        //     inputs_area,
+        //     &mut self.list_state,
+        // );
     }
 }

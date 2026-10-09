@@ -364,17 +364,22 @@ impl App {
                 pages::tracker::TrackerAction::ConsumedKey => true,
             },
             PageAction::Projects(a) => match a {
-                pages::projects::ProjectAction::CreateProject { name, description } => {
-                    let _ = self.db.create_project(&name, "#4A90D9", &description);
+                pages::projects::ProjectAction::CreateProject {
+                    name,
+                    color,
+                    description,
+                } => {
+                    let _ = self.db.create_project(&name, &color, &description);
                     self.update_state();
                     true
                 }
                 pages::projects::ProjectAction::UpdateProject {
                     id,
                     name,
+                    color,
                     description,
                 } => {
-                    let _ = self.db.update_project(id, &name, "#4A90D9", &description);
+                    let _ = self.db.update_project(id, &name, &color, &description);
                     self.update_state();
                     true
                 }
