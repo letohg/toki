@@ -129,7 +129,10 @@ impl Project {
         // let block = Block::new().padding(Padding::symmetric(1, 1));
 
         // self.render_project_list(frame, block.inner(area));
-        self.render_project_list(frame, area);
+        let [metrics_area, project_list_area] =
+            Layout::vertical([Constraint::Length(5), Constraint::Min(5)]).areas(area);
+
+        self.render_project_list(frame, project_list_area);
 
         match &mut self.page_state {
             PageState::CreateProject(form) => {
