@@ -1,15 +1,13 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::Layout;
 use ratatui::style::{self, Stylize};
-use ratatui::text::{Line, Span, Text};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{
-    Block, Borders, Cell, Clear, List, ListItem, ListState, Padding, Paragraph, Row, Table,
-    TableState,
+    Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, TableState,
 };
 use ratatui::{Frame, layout::Rect};
 use ratatui::{layout::Constraint, style::Style};
 use std::collections::HashMap;
-use std::default;
 use std::str::FromStr;
 
 use crate::database::{self, EntityId};
@@ -60,7 +58,11 @@ struct EditProjectForm {
 
 impl EditProjectForm {
     fn new(project: database::Project) -> Self {
-        let values = vec![project.name.clone(), project.description.clone()];
+        let values = vec![
+            project.name.clone(),
+            project.color.clone(),
+            project.description.clone(),
+        ];
         Self {
             project,
             form: InputForm::with_values(
@@ -218,13 +220,11 @@ impl Project {
                 match form_outcome {
                     KeyResult::Action(FormOutcome::Submitted(fields)) => {
                         self.page_state = PageState::Overview;
-                        return KeyResult::Action(PageAction::Projects(
-                            ProjectAction::CreateProject {
-                                name: fields[0].to_owned(),
-                                color: fields[1].to_owned(),
-                                description: fields[2].to_owned(),
-                            },
-                        ));
+                        KeyResult::Action(PageAction::Projects(ProjectAction::CreateProject {
+                            name: fields[0].to_owned(),
+                            color: fields[1].to_owned(),
+                            description: fields[2].to_owned(),
+                        }))
                     }
                     KeyResult::Action(FormOutcome::Cancelled) => {
                         self.page_state = PageState::Overview;
@@ -240,16 +240,14 @@ impl Project {
                 match form_outcome {
                     KeyResult::Action((id, FormOutcome::Submitted(fields))) => {
                         self.page_state = PageState::Overview;
-                        return KeyResult::Action(PageAction::Projects(
-                            ProjectAction::UpdateProject {
-                                id,
-                                name: fields[0].to_owned(),
-                                color: fields[1].to_owned(),
-                                description: fields[2].to_owned(),
-                            },
-                        ));
+                        KeyResult::Action(PageAction::Projects(ProjectAction::UpdateProject {
+                            id,
+                            name: fields[0].to_owned(),
+                            color: fields[1].to_owned(),
+                            description: fields[2].to_owned(),
+                        }))
                     }
-                    KeyResult::Action((id, FormOutcome::Cancelled)) => {
+                    KeyResult::Action((_, FormOutcome::Cancelled)) => {
                         self.page_state = PageState::Overview;
                         KeyResult::Consumed
                     }
@@ -285,6 +283,10 @@ impl Project {
                 } else {
                     self.table_state.select_next();
                 }
+                KeyResult::Consumed
+            }
+            KeyCode::Esc => {
+                self.table_state = self.table_state.with_selected(None);
                 KeyResult::Consumed
             }
             KeyCode::Enter => {
@@ -381,52 +383,54 @@ impl InputForm {
         match self.active_input {
             Some(field_idx) => {
                 let input_type = &self.labels[field_idx].1;
-                match key_event {
-                    KeyEvent {
-                        code: KeyCode::Tab,
-                        modifiers: KeyModifiers::SHIFT,
-                        ..
-                    } => {
-                        self.list_state.select_previous();
-                        self.active_input = self.list_state.selected();
+
+                match key_event.code {
+                    KeyCode::Char(c) => match *input_type {
+                        InputFieldType::String => {
+                            self.values.get_mut(field_idx).unwrap().push(c);
+                            KeyResult::Consumed
+                        }
+                        InputFieldType::Color if c == '#' => {
+                            let col = self.values.get_mut(field_idx).unwrap();
+                            if col.is_empty() {
+                                col.push(c);
+                            }
+                            KeyResult::Consumed
+                        }
+                        InputFieldType::Color if c.is_ascii_hexdigit() => {
+                            let col = self.values.get_mut(field_idx).unwrap();
+                            if !col.is_empty() && col.len() < 7 {
+                                col.push(c);
+                            }
+                            KeyResult::Consumed
+                        }
+                        InputFieldType::Time if c.is_ascii_digit() || c == ':' => {
+                            KeyResult::Consumed
+                        }
+                        _ => KeyResult::Consumed,
+                    },
+                    KeyCode::Backspace => {
+                        self.values.get_mut(field_idx).unwrap().pop();
                         KeyResult::Consumed
                     }
-                    _ => {
-                        match key_event.code {
-                            KeyCode::Char(c) => match *input_type {
-                                InputFieldType::String => {
-                                    self.values.get_mut(field_idx).unwrap().push(c);
-                                    KeyResult::Consumed
-                                }
-                                InputFieldType::Color if c.is_ascii_hexdigit() => {
-                                    let val = self.values.get_mut(field_idx).unwrap();
-                                    if val.len() < 6 {
-                                        val.push(c);
-                                    }
-                                    KeyResult::Consumed
-                                }
-                                InputFieldType::Time if c.is_ascii_digit() || c == ':' => {
-                                    KeyResult::Consumed
-                                }
-                                _ => KeyResult::Consumed,
-                            },
-                            KeyCode::Backspace => {
-                                self.values.get_mut(field_idx).unwrap().pop();
-                                KeyResult::Consumed
-                            }
-                            // Todo: Esc should revert to old value
-                            KeyCode::Esc | KeyCode::Enter => {
-                                self.active_input = None;
-                                KeyResult::Consumed
-                            }
-                            KeyCode::Tab => {
-                                self.list_state.select_next();
-                                self.active_input = self.list_state.selected();
-                                KeyResult::Consumed
-                            }
-                            _ => KeyResult::Unhandled,
-                        }
+                    // Todo: Esc should revert to old value
+                    KeyCode::Esc | KeyCode::Enter => {
+                        self.active_input = None;
+                        KeyResult::Consumed
                     }
+                    KeyCode::BackTab => {
+                        let previous = field_idx.saturating_sub(1);
+                        self.list_state.select(Some(previous));
+                        self.active_input = Some(previous);
+                        KeyResult::Consumed
+                    }
+                    KeyCode::Tab => {
+                        let next = (field_idx + 1).min(self.labels.len() - 1);
+                        self.list_state.select(Some(next));
+                        self.active_input = Some(next);
+                        KeyResult::Consumed
+                    }
+                    _ => KeyResult::Unhandled,
                 }
             }
             None => match key_event.code {
@@ -469,16 +473,13 @@ impl InputForm {
 
                     _ => ListItem::from(l.clone()),
                 };
-                (
-                    label,
-                    if let Some(active) = self.active_input
-                        && active == i
-                    {
-                        ListItem::from(format!("{}│", v))
-                    } else {
-                        create_input_list_item(p, Some(v.clone()))
-                    },
-                )
+
+                let input = match self.active_input {
+                    Some(active) if active == i => ListItem::from(format!("{}│", v)),
+                    _ => create_input_list_item(p, Some(v.clone())),
+                };
+
+                (label, input)
             })
             .unzip();
 
@@ -490,29 +491,5 @@ impl InputForm {
             inputs_area,
             &mut self.list_state,
         );
-
-        // let inputs: List = self
-        //     .values
-        //     .iter()
-        //     .zip(&self.placeholders)
-        //     .enumerate()
-        //     .map(|(i, (v, p))| {
-        //         if let Some(active) = self.active_input
-        //             && active == i
-        //         {
-        //             ListItem::from(format!("{}│", v))
-        //         } else {
-        //             create_input_list_item(p, Some(v.clone()))
-        //         }
-        //     })
-        //     .collect();
-
-        // frame.render_stateful_widget(
-        //     inputs
-        //         .highlight_style(Style::default().fg(theme::LAVENDER).bold())
-        //         .highlight_symbol("› "),
-        //     inputs_area,
-        //     &mut self.list_state,
-        // );
     }
 }
